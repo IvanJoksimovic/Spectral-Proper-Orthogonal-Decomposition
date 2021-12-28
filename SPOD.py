@@ -1,7 +1,6 @@
 #!/usr/bin/python3
 import os
 import time
-#from concurrent.futures import ThreadPoolExecutor  as Executor
 from concurrent.futures import ProcessPoolExecutor as Executor
 import numpy as np
 from numpy.fft import fft,fftfreq 
@@ -21,17 +20,17 @@ class DATA_INPUT_FUNCTIONS:
         print(path)
         return data
     # Usually openFoam raw output method 
-    def readRawFormatLastColumn(path):
+    def readOpenFOAMRawFormatVector_ComponentZ(path):
         data = np.genfromtxt(path,delimiter=None)
         print(path)
         return data[:,-1]
     # Usually openFoam raw output method 
-    def readRawFormatSecondToLastColumn(path):
+    def readOpenFOAMRawFormatVector_ComponentY(path):
         data = np.genfromtxt(path,delimiter=None)
         print(path)
         return data[:,-2]
     # Usually openFoam raw output method 
-    def readRawFormatThirdToLastColumn(path):
+    def readOpenFOAMRawFormatVector_ComponentX(path):
         data = np.genfromtxt(path,delimiter=None)
         print(path)
         return data[:,-3]
@@ -108,7 +107,7 @@ def main():
         TEND = 1e80
 
     try:
-        N_BLOCKS = float(args['timeFinish'])
+        N_BLOCKS = int(args['NBLOCKS'])
     except:
         N_BLOCKS = 1
 
@@ -152,7 +151,9 @@ def main():
 
     print("   Start time                     = {} s".format(TIME[0]))
     print("   End time                       = {} s".format(TIME[-1]))
-    print("   Number of samples              = {} ".format(len(timePaths)))
+    print("   Number of samples              = {} ".format(N))
+    print("   Number of blocks               = {} ".format(N_BLOCKS))
+    print("   Number of points per block     = {} ".format(N_FFT))
     print("   Min delta t                    = {} s".format(max(dts)))
     print("   Max delta t                    = {} s".format(min(dts)))
     print("   Avg delta t                    = {} s".format(dt))
@@ -160,7 +161,8 @@ def main():
     print("   Nyquist frequency              = {} Hz".format(fs/2.0))
     print("   Frequency resolution           = {} Hz".format(fs/N_FFT)) 
     print("   Input method                   = {}   ".format(DATA_INPUT_METHOD)) 
-    print("   Results directory              = {}   ".format(resultsDirectory)) 
+    print("   Results directory              = {}   ".format(resultsDirectory))
+ 
     print("------------------------------------------------------------------")
     
     answer = input("If satisfied with frequency resolution, continue y/n?  ")
@@ -179,7 +181,7 @@ def main():
                 
     finish = time.perf_counter()
     print("===========================================================")
-    print("Finished in:" + str(finish - start))
+    print("Finished in: " + str(finish - start) + "s" )
         
     DATA_MATRIX = np.vstack(R).T   
 
@@ -246,17 +248,26 @@ def main():
             Q.append(SD[:,i])
         Q = np.vstack(Q).T
         print("		Calculating mode {} on frequency {}".format(iii,freq[ii]))
-        [U,Sigma,Vh] = np.linalg.svd(Q)
-        
+        print('		Matrix dimensions: ',Q.shape)
+	       
+        [U,Sigma,Vh] = np.linalg.svd(Q, full_matrices=False)
+ 
         PHI = U[:,0] # Save only the most energetic mode at the specific frequency
-        
+	
+        del U
+  
         fName = "Mode_{}:Frequency_{}".format(iii,f[ii])
         np.savetxt(os.path.join(resultsDirectory,fName), PHI)
         print("		Saving the mode {}".format(iii))
         iii+=1
 
-        
-    plt.stem(f,S)  
+    SS = np.matrix(S)
+    ff = np.matrix(f) 
+
+    np.savetxt(os.path.join(resultsDirectory,"FrequencyBySingularValues"),np.hstack((ff.T,SS.T)))   
+    print("Plotting data")
+
+    plt.stem(f,S)
     plt.xlim(0,20)
     plt.savefig(os.path.join(resultsDirectory,"SpectralEnergy.png"))
     print("All done!")
