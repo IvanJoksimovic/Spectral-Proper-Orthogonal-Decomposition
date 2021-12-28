@@ -7,6 +7,7 @@ from numpy.fft import fft,fftfreq
 import matplotlib.pyplot as plt
 import sys
 import shutil
+import argparse
 
 
 DATA_INPUT_METHOD = "foo"
@@ -36,22 +37,59 @@ def FFT(row):
     
         
 def main():
-
     
-    directory = r"./Noise"
-    name = "field"
+    # Create input arguments:
     
-    resultsDirectory = r"firstResults"
-    N_BLOCKS = 1
+    ap = argparse.ArgumentParser()
     
-    TSTART = 0.0
-    TEND   = 6.0
+    ap.add_argument("-d", "--sourceDirectory", required=True,help="String with a path to directory containing time directories")
+    ap.add_argument("-f", "--sourceFileName", required=True,help="Exact name of the file that will be located in time directories")
+    ap.add_argument("-i", "--inputMethod", required=True,help="Name of the method for data input")
+    ap.add_argument("-r", "--resultsDirectory", required=True,help="Exact name of the results directory")
     
+    ap.add_argument("-t0", "--timeStart", required=False,help="Time from which to start")
+    ap.add_argument("-t1", "--timeFinish", required=False,help="Time with which to finish")
+    ap.add_argument("-n", "--NBLOCKS", required=False,help="Number of blocks to for Welch transformation")
+    
+    args = vars(ap.parse_args())
+    
+    # Parse input arguments
+    
+    
+    directory        = str(args['sourceDirectory'])
+    name             = str(args['sourceFileName'])
+    
+    resultsDirectory = str(args['resultsDirectory'])
+    try:
+        os.rmdir(resultsDirectory)
+    except:
+        print("Unable to remove {}, directory not existing or nor empty".format(resultsDirectory))
+        sys.exit()
+                         
     global DATA_INPUT_METHOD 
-    DATA_INPUT_METHOD = "readSingleColumnData"
-
+    DATA_INPUT_METHOD = str(args['inputMethod'])
     
-    #N_FFT = 300   
+    if(DATA_INPUT_METHOD not in dir(DATA_INPUT_FUNCTIONS)):
+        print("ERROR: " + DATA_INPUT_METHOD + " is not among data input functions:")
+        [print(d) for d in dir(DATA_INPUT_FUNCTIONS)]
+        print("Change name or modify DATA_INPUT_FUNCTIONS class at the start of the code")
+        sys.exit()
+                                            
+    try:
+        TSTART = float(args['timeStart'])
+    except:
+        TSTART = 0
+
+    try:
+        TEND = float(args['timeFinish'])
+    except:
+        TEND = 1e80
+
+    try:
+        N_BLOCKS = float(args['timeFinish'])
+    except:
+        N_BLOCKS = 1
+
     #**********************************************************************************
     #**********************************************************************************
     #
@@ -62,6 +100,9 @@ def main():
         
     timeFiles =  [float(t) for t in os.listdir(directory) if float(t) >= TSTART and float(t) <= TEND]
     timeFiles.sort()
+    
+    if(TEND > timeFiles[-1]):
+        TEND =  timeFiles[-1]
     
     N_FFT = round(2*len(timeFiles)/(N_BLOCKS+1))
     
@@ -80,7 +121,7 @@ def main():
     freq = freq[0:len(freq)//2]
     fs = 1.0/dt
     
-    print("SPECTRAL POD frequency data:")
+    print("SPECTRAL POD data:")
     print("------------------------------------------------------------------")
 
     print("   Start time                     = {} s".format(TIME[0]))
@@ -92,6 +133,8 @@ def main():
     print("   Sampling frequency             = {} Hz".format(fs))
     print("   Nyquist frequency              = {} Hz".format(fs/2.0))
     print("   Frequency resolution           = {} Hz".format(fs/N_FFT)) 
+    print("   Input method                   = {}   ".format(DATA_INPUT_METHOD)) 
+    print("   Results directory              = {}   ".format(resultsDirectory)) 
     print("------------------------------------------------------------------")
     
     answer = input("If satisfied with frequency resolution, continue y/n?  ")
@@ -100,10 +143,7 @@ def main():
         print("OK, exiting calculation")
         sys.exit()
     
-    try:
-        shutil.rmtree(resultsDirectory)
-    except:
-        pass
+
 
 
     os.mkdir(resultsDirectory)
@@ -197,7 +237,8 @@ def main():
     plt.stem(f,S)  
     plt.xlim(0,20)
     plt.savefig(os.path.join(resultsDirectory,"SpectralEnergy.png"))
-    #plt.show()
+    print("All done!")
+
 
 
 
