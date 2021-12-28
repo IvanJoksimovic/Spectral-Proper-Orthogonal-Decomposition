@@ -77,7 +77,7 @@ def main():
     
     resultsDirectory = str(args['resultsDirectory'])
     
-    if(os.directoryExists(resultsDirectory)):       
+    if(os.path.exists(resultsDirectory)):       
         try:
             os.rmdir(resultsDirectory)
         except:
@@ -92,7 +92,7 @@ def main():
     
     if(DATA_INPUT_METHOD not in dir(DATA_INPUT_FUNCTIONS)):
         print("ERROR: " + DATA_INPUT_METHOD + " is not among data input functions:")
-        [print(d) for d in dir(DATA_INPUT_FUNCTIONS)]
+        [print(d) for d in dir(DATA_INPUT_FUNCTIONS) if d.startswith('__') is False]
         print("Change name or modify DATA_INPUT_FUNCTIONS class at the start of the code")
         sys.exit()
                                             
