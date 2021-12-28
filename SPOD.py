@@ -120,8 +120,11 @@ def main():
     #**********************************************************************************
     #**********************************************************************************
         
-    timeFiles =  [float(t) for t in os.listdir(directory) if float(t) >= TSTART and float(t) <= TEND]
-    timeFiles.sort()
+    #timeFiles =  [float(t) for t in os.listdir(directory) if float(t) >= TSTART and float(t) <= TEND]
+    timeFilesUnsorted =  [t for t in os.listdir(directory) if float(t) >= TSTART and float(t) <= TEND]
+    timeFilesStr = sorted(timeFilesUnsorted, key=lambda x: float(x)) 
+
+    timeFiles = [float(t) for t in timeFilesStr]
     
     if(TEND > timeFiles[-1]):
         TEND =  timeFiles[-1]
@@ -133,8 +136,9 @@ def main():
     timeFiles = timeFiles[0:N]
     
     TIME = timeFiles
-    timePaths = [os.path.join(directory,str(t),name) for t in timeFiles]
+    timePaths = [os.path.join(directory,str(t),name) for t in timeFilesStr]
     
+
     # At this point, prompt user 
     dts = np.diff(TIME)
     dt = np.mean(np.diff(TIME))
