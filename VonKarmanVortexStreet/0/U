@@ -1,0 +1,67 @@
+/*---------------------------------------------------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  1.1                                   |
+|   \\  /    A nd           | Web:      http://www.openfoam.org               |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+
+// Field Dictionary
+
+FoamFile
+{
+    version         2.0;
+    format          ascii;
+
+    root            "/home/beilke/FOAM";
+    case            "karmann";
+    instance        "0";
+    local           "";
+
+    class           volVectorField;
+    object          U;
+}
+
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+
+dimensions      [0 1 -1 0 0 0 0];
+
+internalField   uniform (0.15 0 0);
+
+boundaryField
+{
+
+    INLET           
+    {
+        type            fixedValue;
+        value           uniform (0.15 0 0);
+    }
+
+    Outlet           
+    {
+        type            zeroGradient;
+    }
+
+    zylinderWall
+    {
+        type            fixedValue;
+        value           uniform (0 0 0);
+    }
+
+    topbottomWall   
+    {
+        type           zeroGradient;
+//        type            fixedValue;
+//        value           uniform (0 0 0);
+    }
+
+    symmPlane           
+    {
+        type            empty;
+    }
+
+}
+
+
+// ************************************************************************* //
