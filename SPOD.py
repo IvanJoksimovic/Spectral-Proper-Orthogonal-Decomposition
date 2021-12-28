@@ -14,10 +14,26 @@ DATA_INPUT_METHOD = "foo"
 
 
 class DATA_INPUT_FUNCTIONS:
-    def readSingleColumnData(path):
+    # Most simple method, file contains only one column
+    def readSingleColumn(path):
         data = np.genfromtxt(path,delimiter=None)
         print(path)
         return data
+    # Usually openFoam raw output method 
+    def readRawFormatLastColumn(path):
+        data = np.genfromtxt(path,delimiter=None)
+        print(path)
+        return data[:,-1]
+    # Usually openFoam raw output method 
+    def readRawFormatSecondToLastColumn(path):
+        data = np.genfromtxt(path,delimiter=None)
+        print(path)
+        return data[:,-2]
+    # Usually openFoam raw output method 
+    def readRawFormatThirdToLastColumn(path):
+        data = np.genfromtxt(path,delimiter=None)
+        print(path)
+        return data[:,-3]
     
 def dataInput(path):
     return getattr(DATA_INPUT_FUNCTIONS, DATA_INPUT_METHOD)(path)
@@ -60,11 +76,16 @@ def main():
     name             = str(args['sourceFileName'])
     
     resultsDirectory = str(args['resultsDirectory'])
-    try:
-        os.rmdir(resultsDirectory)
-    except:
-        print("Unable to remove {}, directory not existing or nor empty".format(resultsDirectory))
-        sys.exit()
+    
+    if(os.directoryExists(resultsDirectory)):       
+        try:
+            os.rmdir(resultsDirectory)
+        except:
+            print("Unable to remove {}, directory not empty".format(resultsDirectory))
+            sys.exit()
+    else:
+        os.mkdir(resultsDirectory)
+        
                          
     global DATA_INPUT_METHOD 
     DATA_INPUT_METHOD = str(args['inputMethod'])
