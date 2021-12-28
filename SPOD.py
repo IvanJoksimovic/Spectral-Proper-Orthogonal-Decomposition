@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 import os
 import time
 #from concurrent.futures import ThreadPoolExecutor  as Executor
@@ -147,7 +148,7 @@ def main():
 
     print("   Start time                     = {} s".format(TIME[0]))
     print("   End time                       = {} s".format(TIME[-1]))
-    print("   Number of samples              = {} s".format(len(timePaths)))
+    print("   Number of samples              = {} ".format(len(timePaths)))
     print("   Min delta t                    = {} s".format(max(dts)))
     print("   Max delta t                    = {} s".format(min(dts)))
     print("   Avg delta t                    = {} s".format(dt))
@@ -164,10 +165,6 @@ def main():
         print("OK, exiting calculation")
         sys.exit()
     
-
-
-
-    os.mkdir(resultsDirectory)
     
     start = time.perf_counter()
     
