@@ -10,10 +10,8 @@ Code is executed in following steps:
 1) Analysis of source directory, determination of spectral properties (sample frequency, resolution etc), prompting the user for further calculation
 2) Distributed extraction of each spapshot and allocation of zero-padded snapshot-matrix 
 3) Row-vise Welch analysis of snapshot-matrix and allocation of results in spectral-density matrix Q
-4) For each frequency of Q, SVD decomposition is being performed, whereas the left singular vectors U 
-5) First 20 most-energetic modes are stored
-
-
+4) For each frequency of Q, SVD decomposition is being performed, whereas the left singular vectors U (or a single singular vector if 1 Welch block is used) represent modes.
+5) First 20 most-energetic modes are stored in results directory
 
 # Use
 It is assumed that the system-snapshots are distributed in a classical *OpenFOAM* fashion: 
@@ -24,7 +22,7 @@ A single *source directory* contains multiple sub-directories (*time-directories
 Following arguments need to be provided
 - Path to the system directory
 - Name of the snapshot-file, containing snapshot-vector for each time-step
-- Name of the method used for extraction of files
+- Name of the method used for reading and extraction of files (input function)
 - Path to directory where the results will be stored (program will automatically create it)
 
 Optionally, following arguments may be added
@@ -32,18 +30,23 @@ Optionally, following arguments may be added
 - Time instant at which the input should stop (if not provided, all time-instants in a source directory will be read)
 - Number of overlapping frequency blocks for Welch analysis (default is 1)
 
-Full list of arguments can be obtained by typing python3 SPOD.py -h or python3 SPOD.py --help
+Full list of arguments can be obtained by typing python3 SPOD.py -h or python3 SPOD.py --help. All input functions are stored as methods of DATA_INPUT_FUNCTIONS class and must return a single numpy.array. User may add additional input functions at own discression. 
 
 
 # Examples 
 
 Two examples are provided:
 
+A Von-Karman vortex street behing a 2D cylinder is realized in OpenFOAM. Snapshots of velocity,pressure and vorticity are stored with a 1000Hz rate (every 0.001 s). 
+
+First run the code by typing:
+
 cd VonKarmanVortexStreet
 decomposePar 
 mpirun -np 6 pimpleFoam -parallel
 
 Optionally change numer of processors. Wait until the simulation finishes. Run-time post-processing creates the source directory: postProcessing/planeSample, containing time-directories. Each time-directory contains following fields: *p_plane1.raw* , *U_plane1.raw* and *vorticity_plane1.raw*. In this example, we will use vorticity (its Z-component) to calculate SPOD modes. 
+
 In order to execute program, type: 
 
 python3 SPOD.py -d ./VonKarmanVortexStreet/postProcessing/planeSample/ -f vorticity_plane1.raw -i readOpenFOAMRawFormatVector_ComponentZ -r VonKarman_Results -t0 3
