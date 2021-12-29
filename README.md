@@ -1,5 +1,5 @@
 # Spectral-Proper-Orthogonal-Decomposition
-Specral Proper Orthogonal Decomposition (SPOD) represents a technique for extracting dominant spatial coherent structures from large data-sets, whereas each coherent-structure (so called mode) is characterised by unique oscillating frequency. Interested reader is reffered to the works of Town et Al. (2017) and Schmidt and Colonius (2020) for a more detailed discussion of alghoritm. Data-set may contain either measured, or numerical data. 
+Spectral Proper Orthogonal Decomposition (SPOD) represents a technique for extracting dominant spatial coherent structures from large data-sets, whereas each coherent-structure (so called mode) is characterised by unique oscillating frequency. Interested reader is reffered to the works of Town et Al. (2017) and Schmidt and Colonius (2020) for a more detailed discussion of alghoritm. Data-set may contain either measured, or numerical data. 
 
 SPOD.py is an open source python library, created by Ivan Joksimovic of the Technical University of Darmstadt,  for distributed Spectral Proper Orthogonal Decomposition of snapshot matrix (mxn), representing the spatio-temporal sample of an observed system. System may be corrupted by either white- or pink-noise.
 
