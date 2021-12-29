@@ -30,7 +30,7 @@ Optionally, following arguments may be added
 - Time instant at which the input should stop (if not provided, all time-instants in a source directory will be read)
 - Number of overlapping frequency blocks for Welch analysis (default is 1)
 
-Full list of arguments can be obtained by typing python3 SPOD.py -h or python3 SPOD.py --help. All input functions are stored as methods of DATA_INPUT_FUNCTIONS class and must return a single numpy.array. User may add additional input functions at own discression. 
+Full list of arguments can be obtained by typing python3 SPOD.py -h or python3 SPOD.py --help. All input functions are stored as methods of DATA_INPUT_FUNCTIONS class and must return a single numpy.array. User may add additional input functions at own discression. Most time-consuming phase represents a data input, which is therefore performed in a distributed fashion using the concurrent.futures module. All awailable proecessors are used. User may chacnge max number of processors at own discression. 
 
 
 # Examples 
@@ -44,6 +44,7 @@ First run the code by typing:
 cd VonKarmanVortexStreet
 decomposePar 
 mpirun -np 6 pimpleFoam -parallel
+cd ..
 
 Optionally change numer of processors. Wait until the simulation finishes. Run-time post-processing creates the source directory: postProcessing/planeSample, containing time-directories. Each time-directory contains following fields: *p_plane1.raw* , *U_plane1.raw* and *vorticity_plane1.raw*. In this example, we will use vorticity (its Z-component) to calculate SPOD modes. 
 
@@ -55,8 +56,8 @@ This will:
 - read data from the source directory ./VonKarmanVortexStreet/postProcessing/planeSample/
 - read the field named vorticity_plane1.raw
 - use the function readOpenFOAMRawFormatVector_ComponentZ to extract data 
-- create and write all results to VonKarman_Results
-- read every snapshot from 3 seconds and onwards (initial transient takes some time to be blown out of the domain)
+- create and then write all results to VonKarman_Results directory
+- read every snapshot from 3 seconds of simulation time and onwards (initial transient takes some time to be blown out of the domain)
 
 As a result, VonKarman_Results contains 20 files with column-wise corresponding modes. Name of each file also contains its frequency. Also, ordered list named: FrequencyBySingluarValues contains all frequencies and their corresponding singular values. 
 
