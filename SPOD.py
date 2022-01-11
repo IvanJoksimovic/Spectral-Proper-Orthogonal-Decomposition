@@ -62,9 +62,11 @@ def FFT(row):
     w = 0.5 - 0.5*np.cos(2*np.pi*j/(N-1)) # Hamming window
     aw = 2.0 #- correction factor
     
-    yf = fft(np.multiply(row,w))
+    yf = np.abs(fft(np.multiply(row,w)))
     
-    return aw*2.0/N * np.abs(yf[0:N//2])
+    yf[1:N//2] *=2 # Scaling everythig between 0 and Nyquist
+    
+    return (aw/N) * yf[0:N//2]
     
         
 def main():
@@ -212,7 +214,7 @@ def main():
 
     del R # Free memory
      
-    DATA_MATRIX -= DATA_MATRIX.mean(axis=1, keepdims=True) # Mean padded
+    DATA_MATRIX =  DATA_MATRIX = DATA_MATRIX.mean(axis=1) # Mean padded
    
     #**********************************************************************************
     #**********************************************************************************
