@@ -214,7 +214,7 @@ def main():
 
     del R # Free memory
      
-    DATA_MATRIX -= DATA_MATRIX.mean(axis=1,keepdims = Ture) # np.subtract(DATA_MATRIX,np.matrix().T) # Mean padded 
+    DATA_MATRIX -= DATA_MATRIX.mean(axis=1,keepdims = True) # np.subtract(DATA_MATRIX,np.matrix().T) # Mean padded 
 			       
     #**********************************************************************************
     #**********************************************************************************
