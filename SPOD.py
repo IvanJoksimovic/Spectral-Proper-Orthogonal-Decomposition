@@ -58,6 +58,7 @@ def dataInput(path):
 def FFT(row):
     # Creating a Hanning window
     N = len(row)
+    print("N = ",N)
     j = np.linspace(0,N-1,N)
     #w = 0.5 - 0.5*np.cos(2*np.pi*j/(N-1)) # Hamming window
     aw = 1.0 #- correction factor
@@ -250,7 +251,7 @@ def main():
     S = [] # List containing sum of all eigenvalues for each mode
     f = []
     PHI = []
-    print('len(SD_LIST) =',len(SD_LIST))
+
     print("Calculating singular values for frequencies in range {} : {} ".format(freq[0],freq[-1]))
 
     for i in range(0,len(freq)):
