@@ -246,7 +246,7 @@ def main():
     for ii in indxS[0:20]:
         Q = []
         for SD in SD_LIST:
-            Q.append(SD[:,i])
+            Q.append(SD[:,ii])
         Q = np.vstack(Q).T
         print("		Calculating mode {} on frequency {}".format(iii,freq[ii]))
         print('		Matrix dimensions: ',Q.shape)
