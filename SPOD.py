@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import sys
 import shutil
 import argparse
-
+import math
 
 DATA_INPUT_METHOD = "foo"
 
@@ -34,6 +34,21 @@ class DATA_INPUT_FUNCTIONS:
         data = np.genfromtxt(path,delimiter=None)
         print(path)
         return data[:,-3]
+    # Usually openFoam raw output method 
+    def readFirstColumn(path):
+        data = np.genfromtxt(path,delimiter=None)
+        print(path)
+        return data[:,0]
+    # Usually openFoam raw output method 
+    def readSecondColumn(path):
+        data = np.genfromtxt(path,delimiter=None)
+        print(path)
+        return data[:,1]
+    # Usually openFoam raw output method 
+    def readThirdColumn(path):
+        data = np.genfromtxt(path,delimiter=None)
+        print(path)
+        return data[:,2]
     
 def dataInput(path):
     return getattr(DATA_INPUT_FUNCTIONS, DATA_INPUT_METHOD)(path)
@@ -85,6 +100,9 @@ def main():
             print("Unable to remove {}, directory not empty".format(resultsDirectory))
             sys.exit()
     else:
+	
+        print("Creating directory: " + resultsDirectory)
+
         os.mkdir(resultsDirectory)
         
                          
@@ -121,19 +139,21 @@ def main():
     #**********************************************************************************
         
     #timeFiles =  [float(t) for t in os.listdir(directory) if float(t) >= TSTART and float(t) <= TEND]
-    timeFilesUnsorted =  [t for t in os.listdir(directory) if float(t) >= TSTART and float(t) <= TEND]
-    timeFilesStr = sorted(timeFilesUnsorted, key=lambda x: float(x)) 
+    timeFilesUnsorted =  set([t for t in os.listdir(directory) if float(t) >= TSTART and float(t) <= TEND])
+		
+    timeFilesStr = sorted(timeFilesUnsorted, key=lambda x: float(x))
 
     timeFiles = [float(t) for t in timeFilesStr]
-    
+  
     if(TEND > timeFiles[-1]):
         TEND =  timeFiles[-1]
     
-    N_FFT = round(2*len(timeFiles)/(N_BLOCKS+1))
+    N_FFT = round(math.floor(2*len(timeFiles)/(N_BLOCKS+1)))
     
     N = min(len(timeFiles),round(0.5*N_FFT*(N_BLOCKS+1)))
-    
+
     timeFiles = timeFiles[0:N]
+    timeFilesStr = timeFilesStr[0:N]
     
     TIME = timeFiles
     timePaths = [os.path.join(directory,str(t),name) for t in timeFilesStr]
@@ -155,8 +175,8 @@ def main():
     print("   Number of samples              = {} ".format(N))
     print("   Number of blocks               = {} ".format(N_BLOCKS))
     print("   Number of points per block     = {} ".format(N_FFT))
-    print("   Min delta t                    = {} s".format(max(dts)))
-    print("   Max delta t                    = {} s".format(min(dts)))
+    print("   Min delta t                    = {} s".format(min(dts)))
+    print("   Max delta t                    = {} s".format(max(dts)))
     print("   Avg delta t                    = {} s".format(dt))
     print("   Sampling frequency             = {} Hz".format(fs))
     print("   Nyquist frequency              = {} Hz".format(fs/2.0))
@@ -171,7 +191,11 @@ def main():
     if( answer not in ["y","Y","yes","Yes","z","Z"]):
         print("OK, exiting calculation")
         sys.exit()
-    
+
+    # Coordinates 
+    X = np.matrix(getattr(DATA_INPUT_FUNCTIONS,'readFirstColumn')(timePaths[0]))
+    Y = np.matrix(getattr(DATA_INPUT_FUNCTIONS,'readSecondColumn')(timePaths[0]))
+    Z = np.matrix(getattr(DATA_INPUT_FUNCTIONS,'readThirdColumn')(timePaths[0]))
     
     start = time.perf_counter()
     
@@ -197,10 +221,14 @@ def main():
     #
     #**********************************************************************************
     #**********************************************************************************
-    
+    print('DATA_MATRIX.shape = ',DATA_MATRIX.shape)
     SD_LIST = [] # List containing spectral density marices
     for i in range(0,N_BLOCKS):
-        CHUNK = list(DATA_MATRIX[:,i*N_FFT//2:(i+2)*N_FFT//2])
+        ind1 = i*N_FFT//2
+        ind2 = (i+2)*N_FFT//2 
+        dd = DATA_MATRIX[:,ind1:ind2]
+        print('Chunk shape = ',dd.shape)
+        CHUNK = list(DATA_MATRIX[:,ind1:ind2])
         print("Performing FFT on chunk {} of {}".format(i+1,N_BLOCKS))
         R = []
         with Executor() as executor:
@@ -220,12 +248,14 @@ def main():
     S = [] # List containing sum of all eigenvalues for each mode
     f = []
     PHI = []
+    print('len(SD_LIST) =',len(SD_LIST))
+    print("Calculating singular values for frequencies in range {} : {} ".format(freq[0],freq[-1]))
+
     for i in range(0,len(freq)):
         Q = []
         for SD in SD_LIST:
             Q.append(SD[:,i])
         Q = np.vstack(Q).T
-        print("Calculating singular values for frequency {} : {} of {}".format(freq[i],i+1,len(freq)))
         Sigma = np.linalg.svd(Q,compute_uv=False) # Only compute singular values at this stage, we want to avoid caluclating SVD for every mode there is
         S.append(np.dot(Sigma,Sigma))
         f.append(freq[i])
@@ -239,7 +269,10 @@ def main():
     #**********************************************************************************    
     print("Modes by contained variance:")
     print("---------------------------------------------------------")
-        
+
+
+ 
+
     indxS = np.argsort(S) # Sorted indexes of S, from largest to smallest
     indxS = indxS[::-1]
     iii = 1
@@ -253,12 +286,12 @@ def main():
 	       
         [U,Sigma,Vh] = np.linalg.svd(Q, full_matrices=False)
  
-        PHI = U[:,0] # Save only the most energetic mode at the specific frequency
+        PHI = np.matrix(U[:,0]) # Save only the most energetic mode at the specific frequency
 	
         del U
   
         fName = "Mode_{}:Frequency_{}".format(iii,f[ii])
-        np.savetxt(os.path.join(resultsDirectory,fName), PHI)
+        np.savetxt(os.path.join(resultsDirectory,fName), np.vstack((X,Y,Z,PHI)).T)
         print("		Saving the mode {}".format(iii))
         iii+=1
 
@@ -268,10 +301,11 @@ def main():
     np.savetxt(os.path.join(resultsDirectory,"FrequencyBySingularValues"),np.hstack((ff.T,SS.T)))   
     print("Plotting data")
 
-    plt.stem(f,S)
+    plt.plot(f,S)
     plt.xlim(0,20)
     plt.savefig(os.path.join(resultsDirectory,"SpectralEnergy.png"))
     print("All done!")
+    plt.show()
 
 
 
@@ -282,5 +316,4 @@ if __name__ == "__main__":
     main()    
 
        
-
 
