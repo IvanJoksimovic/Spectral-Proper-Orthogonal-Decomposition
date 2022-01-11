@@ -58,7 +58,6 @@ def dataInput(path):
 def FFT(row):
     # Creating a Hanning window
     N = len(row)
-    print("N = ",N)
     j = np.linspace(0,N-1,N)
     #w = 0.5 - 0.5*np.cos(2*np.pi*j/(N-1)) # Hamming window
     aw = 1.0 #- correction factor
