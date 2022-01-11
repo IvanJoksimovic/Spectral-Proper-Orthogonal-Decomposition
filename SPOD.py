@@ -59,11 +59,11 @@ def FFT(row):
     # Creating a Hanning window
     N = len(row)
     j = np.linspace(0,N-1,N)
-    w = 0.5 - 0.5*np.cos(2*np.pi*j/(N-1)) # Hamming window
-    aw = 2.0 #- correction factor
+    #w = 0.5 - 0.5*np.cos(2*np.pi*j/(N-1)) # Hamming window
+    aw = 1.0 #- correction factor
     
-    yf = np.abs(fft(np.multiply(row,w)))
-    
+    #yf = np.abs(fft(np.multiply(row,w)))
+    yf = np.abs(fft(row,w))   
     yf[1:N//2] *=2 # Scaling everythig between 0 and Nyquist
     
     return (aw/N) * yf[0:N//2]
