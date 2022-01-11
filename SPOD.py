@@ -80,6 +80,7 @@ def main():
     if(os.path.exists(resultsDirectory)):       
         try:
             os.rmdir(resultsDirectory)
+            os.mkdir(resultsDirectory)
         except:
             print("Unable to remove {}, directory not empty".format(resultsDirectory))
             sys.exit()
