@@ -63,7 +63,7 @@ def FFT(row):
     aw = 1.0 #- correction factor
     
     #yf = np.abs(fft(np.multiply(row,w)))
-    yf = np.abs(fft(row,w))   
+    yf = np.abs(fft(row))   
     yf[1:N//2] *=2 # Scaling everythig between 0 and Nyquist
     
     return (aw/N) * yf[0:N//2]
