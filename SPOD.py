@@ -49,6 +49,12 @@ class DATA_INPUT_FUNCTIONS:
         data = np.genfromtxt(path,delimiter=None)
         print(path)
         return data[:,2]
+    # Usually openFoam raw output method 
+    def readAllThreeVectorComponents(path):
+        data = np.genfromtxt(path,delimiter=None)
+	data = data[:,-3:]
+        print(path)
+        return data.flatten('F')
     
 def dataInput(path):
     return getattr(DATA_INPUT_FUNCTIONS, DATA_INPUT_METHOD)(path)
