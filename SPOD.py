@@ -308,7 +308,20 @@ def main():
     plt.plot(f,S)
     plt.xlim(0,20)
     plt.savefig(os.path.join(resultsDirectory,"SpectralEnergy.png"))
-    print("All done!")
+    answer = input("All done, write coordinates as well y/n?  ")
+    
+    if( answer not in ["y","Y","yes","Yes","z","Z"]):
+        print("OK, All done!")
+        sys.exit()    
+
+    # Coordinates 
+    X = np.matrix(getattr(DATA_INPUT_FUNCTIONS,'readFirstColumn')(timePaths[0]))
+    Y = np.matrix(getattr(DATA_INPUT_FUNCTIONS,'readSecondColumn')(timePaths[0]))
+    Z = np.matrix(getattr(DATA_INPUT_FUNCTIONS,'readThirdColumn')(timePaths[0]))
+
+    np.savetxt(os.path.join(resultsDirectory,"XYZ_Coordinates"), np.vstack((X,Y,Z)).T)
+    print("		Saving XYZ coordinates".format(iii))
+
     plt.show()
 
 
