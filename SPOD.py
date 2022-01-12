@@ -193,11 +193,6 @@ def main():
     if( answer not in ["y","Y","yes","Yes","z","Z"]):
         print("OK, exiting calculation")
         sys.exit()
-
-    # Coordinates 
-    X = np.matrix(getattr(DATA_INPUT_FUNCTIONS,'readFirstColumn')(timePaths[0]))
-    Y = np.matrix(getattr(DATA_INPUT_FUNCTIONS,'readSecondColumn')(timePaths[0]))
-    Z = np.matrix(getattr(DATA_INPUT_FUNCTIONS,'readThirdColumn')(timePaths[0]))
     
     start = time.perf_counter()
     
@@ -294,7 +289,7 @@ def main():
         del U
   
         fName = "Mode_{}:Frequency_{}".format(iii,f[ii])
-        np.savetxt(os.path.join(resultsDirectory,fName), np.vstack((X,Y,Z,PHI)).T)
+        np.savetxt(os.path.join(resultsDirectory,fName), PHI)
         print("		Saving the mode {}".format(iii))
         iii+=1
 
