@@ -320,7 +320,7 @@ def main():
     Z = np.matrix(getattr(DATA_INPUT_FUNCTIONS,'readThirdColumn')(timePaths[0]))
 
     np.savetxt(os.path.join(resultsDirectory,"XYZ_Coordinates"), np.vstack((X,Y,Z)).T)
-    print("		Saving XYZ coordinates".format(iii))
+    print("		Saving XYZ coordinates")
 
     plt.show()
 
