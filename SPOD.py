@@ -21,37 +21,37 @@ class DATA_INPUT_FUNCTIONS:
         return data
     # Usually openFoam raw output method 
     def readOpenFOAMRawFormatVector_ComponentZ(path):
-        data = np.genfromtxt(path,delimiter=None)
+        data = np.genfromtxt(path,delimiter=None,skip_header=2)
         print(path)
         return data[:,-1]
     # Usually openFoam raw output method 
     def readOpenFOAMRawFormatVector_ComponentY(path):
-        data = np.genfromtxt(path,delimiter=None)
+        data = np.genfromtxt(path,delimiter=None,skip_header=2)
         print(path)
         return data[:,-2]
     # Usually openFoam raw output method 
     def readOpenFOAMRawFormatVector_ComponentX(path):
-        data = np.genfromtxt(path,delimiter=None)
+        data = np.genfromtxt(path,delimiter=None,skip_header=2)
         print(path)
         return data[:,-3]
     # Usually openFoam raw output method 
     def readFirstColumn(path):
-        data = np.genfromtxt(path,delimiter=None)
+        data = np.genfromtxt(path,delimiter=None,skip_header=2)
         print(path)
         return data[:,0]
     # Usually openFoam raw output method 
     def readSecondColumn(path):
-        data = np.genfromtxt(path,delimiter=None)
+        data = np.genfromtxt(path,delimiter=None,skip_header=2)
         print(path)
         return data[:,1]
     # Usually openFoam raw output method 
     def readThirdColumn(path):
-        data = np.genfromtxt(path,delimiter=None)
+        data = np.genfromtxt(path,delimiter=None,skip_header=2)
         print(path)
         return data[:,2]
     # Usually openFoam raw output method 
     def readAllThreeVectorComponents(path):
-        data = np.genfromtxt(path,delimiter=None)
+        data = np.genfromtxt(path,delimiter=None,skip_header=2)
         data = data[:,-3:]
         print(path)
         return data.flatten('F')
