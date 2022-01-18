@@ -21,6 +21,11 @@ class DATA_INPUT_FUNCTIONS:
         #print(path)
         return data
     # Usually openFoam raw output method 
+    def readOpenFOAMRawFormatVector_readScalar(path):
+        data = np.genfromtxt(path,delimiter=None,skip_header=2)
+        #print(path)
+        return data[:,-1]
+    # Usually openFoam raw output method 
     def readOpenFOAMRawFormatVector_ComponentZ(path):
         data = np.genfromtxt(path,delimiter=None,skip_header=2)
         #print(path)
