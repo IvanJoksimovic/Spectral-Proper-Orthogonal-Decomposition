@@ -222,7 +222,6 @@ def main():
     del R # Free memory
      
     DATA_MATRIX -= DATA_MATRIX.mean(axis=1,keepdims = True) # np.subtract(DATA_MATRIX,np.matrix().T) # Mean padded 
-    print(DATA_MATRIX.mean(axis=1))
 			       
     #**********************************************************************************
     #**********************************************************************************
@@ -241,12 +240,8 @@ def main():
         CHUNK = list(DATA_MATRIX[:,ind1:ind2])
         print("Performing FFT on chunk {} of {}".format(i+1,N_BLOCKS))
         R = []
-	'''
+
         with Executor() as executor:
-            for r in executor.map(FFT,CHUNK):
-                R.append(r)
-	'''
-    	with Executor() as executor:
         	R = list(tqdm(executor.map(FFT, CHUNK), total=len(CHUNK)))
         SD_LIST.append(np.vstack(R))
         
@@ -304,7 +299,7 @@ def main():
 	
         del U
   
-        fName = "Mode_{}:Frequency_{}".format(iii,f[ii])
+        fName = "Mode_{}_Frequency_{}".format(iii,f[ii])
         np.savetxt(os.path.join(resultsDirectory,fName), PHI)
         print("		Saving the mode {}".format(iii))
         iii+=1
@@ -343,4 +338,3 @@ if __name__ == "__main__":
     main()    
 
        
-
