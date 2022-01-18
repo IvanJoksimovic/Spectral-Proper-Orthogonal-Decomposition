@@ -241,9 +241,13 @@ def main():
         CHUNK = list(DATA_MATRIX[:,ind1:ind2])
         print("Performing FFT on chunk {} of {}".format(i+1,N_BLOCKS))
         R = []
+	'''
         with Executor() as executor:
             for r in executor.map(FFT,CHUNK):
                 R.append(r)
+	'''
+    	with Executor() as executor:
+        	R = list(tqdm(executor.map(FFT, CHUNK), total=len(CHUNK)))
         SD_LIST.append(np.vstack(R))
         
     del DATA_MATRIX # Free memory 
