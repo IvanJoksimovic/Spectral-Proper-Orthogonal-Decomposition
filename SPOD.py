@@ -10,6 +10,7 @@ import shutil
 import argparse
 import math
 from tqdm import tqdm
+from scipy.signal import hann
 
 DATA_INPUT_METHOD = "foo"
 
@@ -20,47 +21,64 @@ class DATA_INPUT_FUNCTIONS:
         data = np.genfromtxt(path,delimiter=None)
         #print(path)
         return data
-    # Usually openFoam raw output method 
+    # Usually openFoam raw output method
     def readOpenFOAMRawFormatScalar(path):
         data = np.genfromtxt(path,delimiter=None,skip_header=2)
         #print(path)
         return data[:,-1]
-    # Usually openFoam raw output method 
+    # Usually openFoam raw output method
     def readOpenFOAMRawFormatVector_ComponentZ(path):
         data = np.genfromtxt(path,delimiter=None,skip_header=2)
         #print(path)
         return data[:,-1]
-    # Usually openFoam raw output method 
+    # Usually openFoam raw output method
     def readOpenFOAMRawFormatVector_ComponentY(path):
         data = np.genfromtxt(path,delimiter=None,skip_header=2)
         #print(path)
         return data[:,-2]
-    # Usually openFoam raw output method 
+    # Usually openFoam raw output method
     def readOpenFOAMRawFormatVector_ComponentX(path):
         data = np.genfromtxt(path,delimiter=None,skip_header=2)
         #print(path)
         return data[:,-3]
-    # Usually openFoam raw output method 
+    # Usually openFoam raw output method
     def readFirstColumn(path):
         data = np.genfromtxt(path,delimiter=None,skip_header=2)
         #print(path)
         return data[:,0]
-    # Usually openFoam raw output method 
+    # Usually openFoam raw output method
     def readSecondColumn(path):
         data = np.genfromtxt(path,delimiter=None,skip_header=2)
         #print(path)
         return data[:,1]
-    # Usually openFoam raw output method 
+    # Usually openFoam raw output method
     def readThirdColumn(path):
         data = np.genfromtxt(path,delimiter=None,skip_header=2)
         #print(path)
         return data[:,2]
-    # Usually openFoam raw output method 
+    # Usually openFoam raw output method
     def readAllThreeVectorComponents(path):
         data = np.genfromtxt(path,delimiter=None,skip_header=2)
         data = data[:,-3:]
         #print(path)
         return data.flatten('F')
+    # Usually openFoam raw output method
+    def readXZVectorComponents(path):
+        data = np.genfromtxt(path,delimiter=None,skip_header=2)
+        data = data[:,-3:]
+        dataXZ = np.zeros((data.shape[0],2))
+        dataXZ[:,0] = data[:,0]
+        dataXZ[:,1] = data[:,2]
+
+        #print(path)
+        return dataXZ.flatten('F')
+    
+    def readXYVectorComponents(path):
+        data = np.genfromtxt(path,delimiter=None,skip_header=2)
+        data = data[:,-3:]
+        dataXY = np.zeros((data.shape[0],2))
+        dataXY[:,0] = data[:,0]
+        dataXY[:,1] = data[:,1]
     
 def dataInput(path):
     return getattr(DATA_INPUT_FUNCTIONS, DATA_INPUT_METHOD)(path)
@@ -69,13 +87,17 @@ def dataInput(path):
 
 def FFT(row):
     # Creating a Hanning window
+
+
+    w = np.matrix(hann(600))
+
     N = len(row)
     j = np.linspace(0,N-1,N)
     #w = 0.5 - 0.5*np.cos(2*np.pi*j/(N-1)) # Hamming window
     aw = 1.0 #- correction factor
     
     #yf = np.abs(fft(np.multiply(row,w)))
-    yf = np.abs(fft(row))   
+    yf = fft(row)
     yf[1:N//2] *=2 # Scaling everythig between 0 and Nyquist
     
     return (aw/N) * yf[0:N//2]
@@ -209,11 +231,7 @@ def main():
     start = time.perf_counter()
     
     R = []
-    '''
-    with Executor() as executor:
-        for r in executor.map(dataInput,timePaths):
-            R.append(r)
-    '''
+
     print("Reading data files...")
     with Executor() as executor:
         R = list(tqdm(executor.map(dataInput, timePaths), total=len(timePaths)))
@@ -225,18 +243,23 @@ def main():
     DATA_MATRIX = np.vstack(R).T   
 
     del R # Free memory
-     
-    DATA_MATRIX -= DATA_MATRIX.mean(axis=1,keepdims = True) # np.subtract(DATA_MATRIX,np.matrix().T) # Mean padded 
+
+    meanData = DATA_MATRIX.mean(axis=1,keepdims = True) 
+
+    print("Saving mean field...")
+    np.save(os.path.join(resultsDirectory,"MeanField"),meanData)
+
+    DATA_MATRIX -= meanData # Mean padded 
 			       
     #**********************************************************************************
     #**********************************************************************************
     #
-    #    Perform Welch, one frequency at the time
+    #    Perform the windowed FFT, one block at the time
     #
     #**********************************************************************************
     #**********************************************************************************
     print('DATA_MATRIX.shape = ',DATA_MATRIX.shape)
-    SD_LIST = [] # List containing spectral density marices
+    SD = [] # List containing spectral density matrices
     for i in range(0,N_BLOCKS):
         ind1 = i*N_FFT//2
         ind2 = (i+2)*N_FFT//2 
@@ -248,93 +271,54 @@ def main():
 
         with Executor() as executor:
         	R = list(tqdm(executor.map(FFT, CHUNK), total=len(CHUNK)))
-        SD_LIST.append(np.vstack(R))
+        SD.append(np.vstack(R))
+
+    SD = np.stack(SD,axis = 2) # SD matrix has the dimensions: dimension x frequency x block
         
     del DATA_MATRIX # Free memory 
                     
     #**********************************************************************************
     #**********************************************************************************
     #
-    #    First calculate singular values and use them to sort modes 
+    #    Sort modes  
     #
     #**********************************************************************************
     #**********************************************************************************
-    S = [] # List containing sum of all eigenvalues for each mode
-    f = []
-    PHI = []
 
-    print("Calculating singular values for frequencies in range {} : {} ".format(freq[0],freq[-1]))
+    PSD = np.sum(np.sum(np.abs(SD),axis = 2),axis = 0) # list containing the PSD per frequency
 
-    for i in range(0,len(freq)):
-        Q = []
-        for SD in SD_LIST:
-            Q.append(SD[:,i])
-        Q = np.vstack(Q).T
-        Sigma = np.linalg.svd(Q,compute_uv=False) # Only compute singular values at this stage, we want to avoid caluclating SVD for every mode there is
-        S.append(np.dot(Sigma,Sigma))
-        f.append(freq[i])
-       
-    #**********************************************************************************
-    #**********************************************************************************
-    #
-    #    Next, perform full SVD for the most energetic 20 modes 
-    #
-    #**********************************************************************************
-    #**********************************************************************************    
-    print("Modes by contained variance:")
-    print("---------------------------------------------------------")
+    totalPower = np.sum(PSD)
+
+    print("Saving the frequencies..")
+    np.savetxt(os.path.join(resultsDirectory,"frequencies"),freq.T)
+
+    print("Saving the PSD..")
+    np.savetxt(os.path.join(resultsDirectory,"PSD"),PSD.T)
+
+    ind = np.argsort(-1*PSD)[0:20] # First 20 according to the captured spectral power will be 
+
+    for i in ind[0:1]:
+        print("Performing the SVD on the frequency: {}, PSD: {}".format(freq[i],PSD[i])/totalPower)
+        # Perform SVD on a set of dimesnion x block, at frequency
+
+        start = time.perf_counter()
+        Q,R = qr(SD[:,i,:])
+        Ur,Sig,Vh = svd(R,full_matrices=False)
+        U = np.dot(Q,Ur)
+
+        finish = time.perf_counter()
+        print("Finished in: {} s, saving the mode ...".format(finish - start))
+        np.savetxt(os.path.join(resultsDirectory,"./SpatialMode_f:{}".format(freq[i])),U)
 
 
- 
-
-    indxS = np.argsort(S) # Sorted indexes of S, from largest to smallest
-    indxS = indxS[::-1]
-    iii = 1
-    for ii in indxS[0:20]:
-        Q = []
-        for SD in SD_LIST:
-            Q.append(SD[:,ii])
-        Q = np.vstack(Q).T
-        print("		Calculating mode {} on frequency {}".format(iii,freq[ii]))
-        print('		Matrix dimensions: ',Q.shape)
-	       
-        [U,Sigma,Vh] = np.linalg.svd(Q, full_matrices=False)
- 
-        PHI = np.matrix(U[:,0]) # Save only the most energetic mode at the specific frequency
-	
-        del U
-  
-        fName = "Mode_{}_Frequency_{}".format(iii,f[ii])
-        np.savetxt(os.path.join(resultsDirectory,fName), PHI)
-        print("		Saving the mode {}".format(iii))
-        iii+=1
-
-    SS = np.matrix(S)
-    ff = np.matrix(f) 
-
-    np.savetxt(os.path.join(resultsDirectory,"FrequencyBySingularValues"),np.hstack((ff.T,SS.T)))   
-    print("Plotting data")
-
-    plt.plot(f,S)
-    plt.xlim(0,20)
-    plt.savefig(os.path.join(resultsDirectory,"SpectralEnergy.png"))
-    answer = input("All done, write coordinates as well y/n?  ")
-    
-    if( answer not in ["y","Y","yes","Yes","z","Z"]):
-        print("OK, All done!")
-        sys.exit()    
 
     # Coordinates 
+    print("     Saving XYZ coordinates")
     X = np.matrix(getattr(DATA_INPUT_FUNCTIONS,'readFirstColumn')(timePaths[0]))
     Y = np.matrix(getattr(DATA_INPUT_FUNCTIONS,'readSecondColumn')(timePaths[0]))
     Z = np.matrix(getattr(DATA_INPUT_FUNCTIONS,'readThirdColumn')(timePaths[0]))
 
-    np.savetxt(os.path.join(resultsDirectory,"XYZ_Coordinates"), np.vstack((X,Y,Z)).T)
-    print("		Saving XYZ coordinates")
-
-    plt.show()
-
-
+    np.savetxt(os.path.join(resultsDirectory,"XYZ_Coordinates"), np.vstack((X,Y,Z)).T)   
 
 
 
