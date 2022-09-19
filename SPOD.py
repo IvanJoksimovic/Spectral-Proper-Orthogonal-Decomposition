@@ -11,7 +11,13 @@ import argparse
 import math
 from tqdm import tqdm
 from scipy.signal import hann
+from dask.array.linalg import svd
 
+
+from dask import delayed,compute
+
+from dask.distributed import Client, progress
+import dask.array as da
 DATA_INPUT_METHOD = "foo"
 
 
@@ -45,21 +51,24 @@ class DATA_INPUT_FUNCTIONS:
     def readFirstColumn(path):
         data = np.genfromtxt(path,delimiter=None,skip_header=2)
         #print(path)
-        return data[:,0]
+        return data[::10,0]
     # Usually openFoam raw output method
     def readSecondColumn(path):
         data = np.genfromtxt(path,delimiter=None,skip_header=2)
         #print(path)
-        return data[:,1]
+        return data[::10,1]
     # Usually openFoam raw output method
     def readThirdColumn(path):
         data = np.genfromtxt(path,delimiter=None,skip_header=2)
         #print(path)
-        return data[:,2]
+        return data[::10,2]
     # Usually openFoam raw output method
     def readAllThreeVectorComponents(path):
         data = np.genfromtxt(path,delimiter=None,skip_header=2)
         data = data[:,-3:]
+
+        data = data[::10,:]
+
         #print(path)
         return data.flatten('F')
     # Usually openFoam raw output method
@@ -85,22 +94,20 @@ def dataInput(path):
 
 
 
-def FFT(row):
-    # Creating a Hanning window
+def fftChunk(chunk):
 
+    if(len(chunk.shape) == 2):
 
-    w = np.matrix(hann(600))
+        #print("Two dimensional matrix,after transposing ",chunk.shape)
+        chunk = np.expand_dims(chunk,axis = 2)
+        chunk = np.swapaxes(chunk,1,2)
+        chunk = np.swapaxes(chunk,0,1)
 
-    N = len(row)
-    j = np.linspace(0,N-1,N)
-    #w = 0.5 - 0.5*np.cos(2*np.pi*j/(N-1)) # Hamming window
-    aw = 1.0 #- correction factor
-    
-    #yf = np.abs(fft(np.multiply(row,w)))
-    yf = fft(row)
-    yf[1:N//2] *=2 # Scaling everythig between 0 and Nyquist
-    
-    return (aw/N) * yf[0:N//2]
+    M,N,B = chunk.shape
+    #print("In fftChunk, chunk.shape = ",chunk.shape)
+    yf = fft(chunk,axis = 1)
+    return (1/N)*yf[0:N//2]
+
     
         
 def main():
@@ -116,6 +123,7 @@ def main():
     
     ap.add_argument("-t0", "--timeStart", required=False,help="Time from which to start")
     ap.add_argument("-t1", "--timeFinish", required=False,help="Time with which to finish")
+    ap.add_argument("-s", "--step", required=False,help="Sampling step")
     ap.add_argument("-n", "--NBLOCKS", required=False,help="Number of blocks to for Welch transformation")
     
     args = vars(ap.parse_args())
@@ -166,6 +174,11 @@ def main():
     except:
         N_BLOCKS = 1
 
+    try:
+        STEP = int(args['step'])
+    except:
+        STEP = 1
+
     #**********************************************************************************
     #**********************************************************************************
     #
@@ -178,6 +191,8 @@ def main():
     timeFilesUnsorted =  set([t for t in os.listdir(directory) if float(t) >= TSTART and float(t) <= TEND])
 		
     timeFilesStr = sorted(timeFilesUnsorted, key=lambda x: float(x))
+    
+    timeFilesStr = timeFilesStr[::STEP]
 
     timeFiles = [float(t) for t in timeFilesStr]
   
@@ -200,7 +215,6 @@ def main():
     dt = np.mean(np.diff(TIME))
         
     freq = fftfreq(N_FFT,dt)
-    freq = freq[0:len(freq)//2]
     fs = 1.0/dt
     
     print("SPECTRAL POD data:")
@@ -229,88 +243,106 @@ def main():
         sys.exit()
     
     start = time.perf_counter()
+
+    print("Starting the dask client...")
+    #client = Client(n_workers=10)
     
-    R = []
+    client = Client(#processes=True, 
+                    #threads_per_worker=10,
+                    #n_workers=4, 
+                    #memory_limit='2GB'
+                    )
 
-    print("Reading data files...")
-    with Executor() as executor:
-        R = list(tqdm(executor.map(dataInput, timePaths), total=len(timePaths)))
-                
-    finish = time.perf_counter()
-    print("===========================================================")
-    print("Finished in: " + str(finish - start) + "s" )
+    client.restart()
+    
+
+    nProc = len(client.scheduler_info()['workers'])
+
+
+    # ***********************************************************************************************
+    #
+    #     Reading the data    
+    #
+    # ***********************************************************************************************
+
+    print("Done. Mapping the data-input to the client...")
+    R = client.map(getattr(DATA_INPUT_FUNCTIONS,DATA_INPUT_METHOD),timePaths)
+    print("Done. Reading {} data files with {} distributed workers ...".format(len(timePaths),nProc))
+    progress(R)
+    print('Done. Gathering the result...')
+    R = client.gather(R)
+    print('Done. Stacking the data into the snapshot matrix...')
+    DATA_MATRIX = np.stack(R,axis = 1)
+
+    m,n = DATA_MATRIX.shape
+    print('Done. Mean padding the snapshot matrix with dimensions {} x {}...'.format(m,n))
+    DATA_MATRIX -= DATA_MATRIX.mean(axis=1,keepdims = True)
+
+    # ***********************************************************************************************
+    #
+    #     Calculate spectral-density matrix   
+    #
+    # ***********************************************************************************************
+
+    print("Done. Preparing the graph for fft...")    
+    
+    w = np.hanning(N_FFT) # Hanning window
+    W = np.stack([w for i in range(m)])
+
+    SD = np.stack([W*DATA_MATRIX[:,i*N_FFT//2: (i+2)*N_FFT//2] for i in range(N_BLOCKS)],axis = 2)
+
+
+    print("Done. Mapping the data-input to the client...")
+    R = client.map(fftChunk,[SD[i,:,:] for i in range(m)])
+    print("Done. Performing the fft on {} chunks {} with {} distributed workers ...".format(len(R),SD[0,:,:].shape,nProc))
+    progress(R)
+    print('Done. Gathering the result...')
+    R = client.gather(R)
+    print('Done. Stacking the data into the spectral-density matrix...')
+    SD = np.vstack(R)
+    del R
+
+    # ***********************************************************************************************
+    #
+    #     Compute PSD    
+    #
+    # ***********************************************************************************************
+
+    PSD = da.sum(da.absolute(SD),axis = (0,2))
+    print("Computing PSD")
+    PSD = PSD.persist()  # start computation in the background
+    progress(PSD)      # watch progress
+    PSD = PSD.compute()      # convert to final result when done if desired
+
+    freq = freq[0:N_FFT//2]
+    PSD = PSD[0:N_FFT//2]
+    SD = SD[:,0:N_FFT//2,:]
+
+    print("Saving PSD/frequency...")
+    np.savetxt(os.path.join(resultsDirectory,"Frequencies"),freq)
+    np.savetxt(os.path.join(resultsDirectory,"PSD"),PSD)
+
+    # ***********************************************************************************************
+    #
+    #     Compute and save modes    
+    #
+    # ***********************************************************************************************   
+
+    ind = np.argsort(-1*PSD)
+
+    j = 1
+    for i in ind[0:20]:
+        U,Sig,Vh = svd(da.from_array(SD[:,i,:])) #,compute_svd=True)
         
-    DATA_MATRIX = np.vstack(R).T   
+        print("Calculating and saving spatial modes on a frequency {}".format(freq[i]))
+        U = U.persist()
+        progress(U)
+        U = U.compute()
+        np.savetxt(os.path.join(resultsDirectory,"Mode_{}_f_{}".format(j,freq[i])),U)
+        j+=1
+    
 
-    del R # Free memory
-
-    meanData = DATA_MATRIX.mean(axis=1,keepdims = True) 
-
-    print("Saving mean field...")
-    np.save(os.path.join(resultsDirectory,"MeanField"),meanData)
-
-    DATA_MATRIX -= meanData # Mean padded 
-			       
-    #**********************************************************************************
-    #**********************************************************************************
-    #
-    #    Perform the windowed FFT, one block at the time
-    #
-    #**********************************************************************************
-    #**********************************************************************************
-    print('DATA_MATRIX.shape = ',DATA_MATRIX.shape)
-    SD = [] # List containing spectral density matrices
-    for i in range(0,N_BLOCKS):
-        ind1 = i*N_FFT//2
-        ind2 = (i+2)*N_FFT//2 
-        dd = DATA_MATRIX[:,ind1:ind2]
-        print('Chunk shape = ',dd.shape)
-        CHUNK = list(DATA_MATRIX[:,ind1:ind2])
-        print("Performing FFT on chunk {} of {}".format(i+1,N_BLOCKS))
-        R = []
-
-        with Executor() as executor:
-        	R = list(tqdm(executor.map(FFT, CHUNK), total=len(CHUNK)))
-        SD.append(np.vstack(R))
-
-    SD = np.stack(SD,axis = 2) # SD matrix has the dimensions: dimension x frequency x block
         
-    del DATA_MATRIX # Free memory 
-                    
-    #**********************************************************************************
-    #**********************************************************************************
-    #
-    #    Sort modes  
-    #
-    #**********************************************************************************
-    #**********************************************************************************
-
-    PSD = np.sum(np.sum(np.abs(SD),axis = 2),axis = 0) # list containing the PSD per frequency
-
-    totalPower = np.sum(PSD)
-
-    print("Saving the frequencies..")
-    np.savetxt(os.path.join(resultsDirectory,"frequencies"),freq.T)
-
-    print("Saving the PSD..")
-    np.savetxt(os.path.join(resultsDirectory,"PSD"),PSD.T)
-
-    ind = np.argsort(-1*PSD)[0:20] # First 20 according to the captured spectral power will be 
-
-    for i in ind[0:1]:
-        print("Performing the SVD on the frequency: {}, PSD: {}".format(freq[i],PSD[i])/totalPower)
-        # Perform SVD on a set of dimesnion x block, at frequency
-
-        start = time.perf_counter()
-        Q,R = qr(SD[:,i,:])
-        Ur,Sig,Vh = svd(R,full_matrices=False)
-        U = np.dot(Q,Ur)
-
-        finish = time.perf_counter()
-        print("Finished in: {} s, saving the mode ...".format(finish - start))
-        np.savetxt(os.path.join(resultsDirectory,"./SpatialMode_f:{}".format(freq[i])),U)
-
-
 
     # Coordinates 
     print("     Saving XYZ coordinates")
@@ -320,7 +352,7 @@ def main():
 
     np.savetxt(os.path.join(resultsDirectory,"XYZ_Coordinates"), np.vstack((X,Y,Z)).T)   
 
-
+    print("All done!")
 
     
 if __name__ == "__main__":
