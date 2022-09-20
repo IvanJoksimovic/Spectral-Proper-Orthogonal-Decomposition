@@ -47,30 +47,28 @@ class DATA_INPUT_FUNCTIONS:
         data = np.genfromtxt(path,delimiter=None,skip_header=2)
         #print(path)
         return data[:,-3]
+
     # Usually openFoam raw output method
     def readFirstColumn(path):
         data = np.genfromtxt(path,delimiter=None,skip_header=2)
-        #print(path)
-        return data[::10,0]
-    # Usually openFoam raw output method
+        data = data[:,0]
+        return data.flatten('F')
+
     def readSecondColumn(path):
         data = np.genfromtxt(path,delimiter=None,skip_header=2)
-        #print(path)
-        return data[::10,1]
+        return data.flatten('F')
+ 
     # Usually openFoam raw output method
     def readThirdColumn(path):
         data = np.genfromtxt(path,delimiter=None,skip_header=2)
-        #print(path)
-        return data[::10,2]
+        return data.flatten('F')
+
     # Usually openFoam raw output method
     def readAllThreeVectorComponents(path):
         data = np.genfromtxt(path,delimiter=None,skip_header=2)
-        data = data[:,-3:]
-
-        data = data[::10,:]
-
-        #print(path)
+        data = data[ind,-3:]
         return data.flatten('F')
+
     # Usually openFoam raw output method
     def readXZVectorComponents(path):
         data = np.genfromtxt(path,delimiter=None,skip_header=2)
@@ -338,7 +336,7 @@ def main():
         U = U.persist()
         progress(U)
         U = U.compute()
-        np.savetxt(os.path.join(resultsDirectory,"Mode_{}_f_{}".format(j,freq[i])),U)
+        np.save(os.path.join(resultsDirectory,"Mode_{}_f_{}".format(j,freq[i])),U)
         j+=1
     
 
@@ -346,11 +344,8 @@ def main():
 
     # Coordinates 
     print("     Saving XYZ coordinates")
-    X = np.matrix(getattr(DATA_INPUT_FUNCTIONS,'readFirstColumn')(timePaths[0]))
-    Y = np.matrix(getattr(DATA_INPUT_FUNCTIONS,'readSecondColumn')(timePaths[0]))
-    Z = np.matrix(getattr(DATA_INPUT_FUNCTIONS,'readThirdColumn')(timePaths[0]))
-
-    np.savetxt(os.path.join(resultsDirectory,"XYZ_Coordinates"), np.vstack((X,Y,Z)).T)   
+    XYZ = np.genfromtxt(timePaths[0])[:,0:3]
+    np.save(os.path.join(resultsDirectory,"XYZ_Coordinates"), XYZ)
 
     print("All done!")
 
