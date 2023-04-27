@@ -46,18 +46,30 @@ decomposePar
 mpirun -np 6 pimpleFoam -parallel
 cd ..
 
-Optionally change numer of processors. Wait until the simulation finishes. Run-time post-processing creates the source directory: postProcessing/planeSample, containing time-directories. Each time-directory contains following fields: *p_plane1.raw* , *U_plane1.raw* and *vorticity_plane1.raw*. In this example, we will use vorticity (its Z-component) to calculate SPOD modes. 
+Optionally change numer of processors. Wait until the simulation finishes. Run-time post-processing creates the source directory: postProcessing/planeSample, containing time-directories. Each time-directory contains following fields: *p_plane1.raw* , *U_plane1.raw* and *vorticity_plane1.raw*. In this example, we will use pressure to calculate SPOD modes. 
 
 In order to execute program, type for the execution with ex. 16 processes: 
 
-mpirun -np 16 python3 -m mpi4py SPOD.py -d ./VonKarmanVortexStreet/postProcessing/planeSample/ -f vorticity_plane1.raw -i readAllThreeVectorComponents -r VonKarman_Results -t0 3
+mpirun -np 16 python3 -m mpi4py SPOD.py -d ./VonKarmanVortexStreet/postProcessing/planeSample/ -f vorticity_plane1.raw -i readScalar -r VonKarman_SPOD_Results -t0 3 -n 2
 
 This will: 
 - read data from the source directory ./VonKarmanVortexStreet/postProcessing/planeSample/
-- read the field named vorticity_plane1.raw
-- use the function readAllThreeVectorComponents to extract data 
+- read the field named p_plane1.raw
+- use the function readScalar to extract data 
 - create and then write all results to VonKarman_Results directory
 - read every snapshot from 3 seconds of simulation time and onwards (initial transient takes some time to be blown out of the domain)
+- create two overlapping blocks of which will be subjected to the svd analysis, frequency by frequency.
+
+Results are stored in a matrix form (*.npy),readable with numpy.load. 
+
+Folloving fields will be written-out in the results directory:
+- XYZ_Coordinates.npy, contains Mx3 matrix, where M is the number of points. Each row contains x,y and z coordinate of the point. 
+- MeanField.npy (values of the mean field), contains Mxk matrix, where k is 1 for scalar field, 3 for vector field
+- Frequencies.py, contains the matrix Nx1, where N is the number of frequencies between 0 and Nyquist frequency
+- EigenValues.npy, contains NxNbl matrix, where Nbl is the number of overlapping blocks. Each row corresponds to the eigenvalues of the mode at the N-th frequency
+
+Additionally, program will automatically write the leading 30 SPOD modes, with largest eigenvalues. They are stored in the format:
+Mode_{number}_f_{frequency}.npy, where number is the sorted position of the mode, and frequency is the frequency at which the Mode oscillates.
 
 
 
