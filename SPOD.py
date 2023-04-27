@@ -122,7 +122,7 @@ class DATA_INPUT_FUNCTIONS:
         if not returnOnlyCoordinates:
             return data[:,-1]
         else:
-            return data[:,0:2]
+            return data[:,0:3]
 
     def readAllThreeVectorComponents(path,returnOnlyCoordinates = False):
         data = np.genfromtxt(path,delimiter=None,skip_header=0)
@@ -131,7 +131,7 @@ class DATA_INPUT_FUNCTIONS:
             data = data[:,3:6]
             return data.flatten('F')
         else:
-            return data[:,0:2]
+            return data[:,0:3]
 
 
     
