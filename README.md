@@ -48,18 +48,17 @@ cd ..
 
 Optionally change numer of processors. Wait until the simulation finishes. Run-time post-processing creates the source directory: postProcessing/planeSample, containing time-directories. Each time-directory contains following fields: *p_plane1.raw* , *U_plane1.raw* and *vorticity_plane1.raw*. In this example, we will use vorticity (its Z-component) to calculate SPOD modes. 
 
-In order to execute program, type: 
+In order to execute program, type for the execution with ex. 16 processes: 
 
-python3 SPOD.py -d ./VonKarmanVortexStreet/postProcessing/planeSample/ -f vorticity_plane1.raw -i readOpenFOAMRawFormatVector_ComponentZ -r VonKarman_Results -t0 3
+mpirun -np 16 python3 -m mpi4py SPOD.py -d ./VonKarmanVortexStreet/postProcessing/planeSample/ -f vorticity_plane1.raw -i readAllThreeVectorComponents -r VonKarman_Results -t0 3
 
 This will: 
 - read data from the source directory ./VonKarmanVortexStreet/postProcessing/planeSample/
 - read the field named vorticity_plane1.raw
-- use the function readOpenFOAMRawFormatVector_ComponentZ to extract data 
+- use the function readAllThreeVectorComponents to extract data 
 - create and then write all results to VonKarman_Results directory
 - read every snapshot from 3 seconds of simulation time and onwards (initial transient takes some time to be blown out of the domain)
 
-As a result, VonKarman_Results contains 20 files with column-wise corresponding modes. Name of each file also contains its frequency. Also, ordered list named: FrequencyBySingluarValues contains all frequencies and their corresponding singular values. 
 
 
 
