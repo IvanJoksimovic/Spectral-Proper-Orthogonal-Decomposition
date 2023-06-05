@@ -292,9 +292,6 @@ def main():
 
         # At this point, prompt user 
         dts = np.diff(TIME)
-        #plt.hist(dts)
-        #plt.show()
-        #comm.Abort()
         dt = np.mean(np.diff(TIME))
             
         freq = fftfreq(N_FFT,dt)
@@ -370,17 +367,28 @@ def main():
     comm.barrier()
     if rank ==0 : print(f"Done. Total size of the data matrix: {sum(chunkSizes)/(1024*1024)} MB")
 
-    # Calculate and subtract mean:
-    # ******************************************
-    if rank ==0 : print(f"Calculating, subtracting and saving mean...")
+    # Calculate and subtract mean, calculate variance:
+    # ***********************************************
+    if rank ==0 : print(f"Calculating mean and variance, subtracting mean...")
     Qmean = Q.mean(axis=1)
+    Qvar = np.var(Q,axis = 1)
+    
     Q -= Q.mean(axis=1,keepdims = True)
-
+    
     Qmean = np.array( comm.gather(Qmean,root = 0) )
 
+    Qvar = np.array( comm.gather(Qvar,root = 0) )
+    
     if rank == 0 : 
-
+    
+        Qmean = np.concatenate(Qmean)
+        Qvar = np.concatenate(Qvar)
+    
+        print("Done. Saving Mean...")
         np.save(os.path.join(resultsDirectory,"MeanField"),Qmean)
+        
+        print("Done. Saving Variance...")
+        np.save(os.path.join(resultsDirectory,"VarianceField"),Qvar)
 
         print("Done. Saving coordinates...")
         XYZ = getattr(DATA_INPUT_FUNCTIONS,DATA_INPUT_METHOD)(local_files[0],returnOnlyCoordinates = True)
