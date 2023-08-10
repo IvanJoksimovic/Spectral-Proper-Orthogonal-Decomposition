@@ -23,11 +23,36 @@ from scipy.linalg import svd
 from tqdm import tqdm
 
 
+
+
 DATA_INPUT_METHOD = "foo"
 
 
 global comm 
-nprocs = 0 # Global variable
+global nprocs
+global maxModes 
+
+maxModes = 60
+
+nprocs = 1 # Global variable
+
+def calc_confidenceBounds(Nb,confidence = 0.99):
+    from scipy.stats import chi2
+
+    alpha = 1 -confidence
+
+    population_below = 1-alpha/2
+    L = chi2.ppf(population_below , df = 2*Nb)
+    #print(f"The critical value with {df} degrees of freedom and {100*population_below}% below it is: {L:.3f}")
+
+    population_below = alpha/2
+    R = chi2.ppf(population_below , df = 2*Nb)
+    #print(f"The critical value with {df} degrees of freedom and {100*population_below}% below it is: {R:.3f}")
+
+    lb = 2*Nb/L 
+    rb = 2*Nb/R
+
+    return lb,rb
 
 def getArgsFromCmd():
     pass
@@ -37,6 +62,20 @@ def splitEficiently(m):
         count = [ave + 1 if p < res else ave for p in range(nprocs)]
         count = np.array(count)
         return count
+
+def splitListIntoChunks(L):
+    m = len(L)
+    ave, res = divmod(m, nprocs)
+    count = [ave + 1 if p < res else ave for p in range(nprocs)]
+    counts = np.array(count)
+
+    parts = []
+    s = 0
+    for c in counts:
+        parts.append(L[s:s+c])
+        s+=c
+
+    return parts,counts
 
 def distribute2DColumnChunksToRowChunks(A):
         RECV = []
@@ -75,6 +114,51 @@ def distribute2DColumnChunksToRowChunks(A):
 
         return np.block([r.reshape(-1,nn) for r,nn in zip(RECV,cols)]) 
 
+
+def distribute3DRowChunksToColumnChunks(A):
+    RECV = []
+
+    m,n,k = A.shape
+
+    colCount = splitEficiently(n)
+    colCount = comm.bcast(colCount, root=0) # Scatter the list of files for each processor to read
+
+    rows = comm.gather(m,root=0)
+    rows = comm.bcast(rows,root=0) # How many rows are there on each processor (must be the same)
+
+    for i in range(0,nprocs):
+
+        if rank == i:
+            sendbuf = A.transpose(1,0,2).flatten()
+            count = colCount*k*rows[rank]
+
+            #displacement: the starting index of each sub-task
+            displ = [sum(count[:p]) for p in range(nprocs)]
+            displ = np.array(displ)
+
+            #print(f"On processor {rank}, sendbuf = {sendbuf}, count = {count}, displ = {displ}")   
+        else:
+            sendbuf = None
+            count = np.zeros(nprocs, dtype=np.int64)
+            displ = None       
+
+        comm.Bcast(count, root=i)
+        recvbuf = np.zeros(count[rank])
+
+        comm.Scatterv([sendbuf, count, displ,MPI.DOUBLE], recvbuf, root=i)   
+
+        #print(f"On processor {rank}, recvbuf = {recvbuf}, size of {len(recvbuf)}")   
+
+        RECV.append(recvbuf.reshape(colCount[rank],-1,k).transpose(1,0,2))
+
+    return np.vstack(RECV)
+ 
+
+        
+
+
+
+
 def gather2DDataToRoot(Qhati):
 
         m,n = Qhati.shape
@@ -112,6 +196,11 @@ def gather2DDataToRoot(Qhati):
 def Info(string):
         if rank ==0:
                 print(string)
+                f = open(logFile,'a')
+                f.write(string)
+                f.write('\n')
+                f.close()
+
 
 
 class DATA_INPUT_FUNCTIONS:
@@ -133,6 +222,16 @@ class DATA_INPUT_FUNCTIONS:
         else:
             return data[:,0:3]
 
+    def readVectorMagnitudeFromPowerFLOWCSV(path,returnOnlyCoordinates = False):
+        data = np.genfromtxt(path,delimiter=',',skip_header=1,filling_values = 0.0)
+        #print(path)
+        if not returnOnlyCoordinates:
+            data = data[:,3]
+            #print(f"For time {path.split('/')[-2]}, shape of the data is {data.shape}")
+            #print(f"Shape of the data is {data.shape}")
+            return data.flatten('F')
+        else:
+            return data[:,0:3]
 
     
 def dataInput(path):
@@ -173,6 +272,9 @@ def main():
     global nprocs
     global comm
     global rank
+    global resultsDirectory
+
+    global logFile
     
 
     ## -------------------------------------------------------------------
@@ -186,6 +288,7 @@ def main():
     except:
         comm = None
         rank = 0
+        nprocs = 1
 
         
 
@@ -228,6 +331,8 @@ def main():
         
             print("Creating directory: " + resultsDirectory)
             os.makedirs(resultsDirectory,exist_ok=True)
+
+        logFile = os.path.join(resultsDirectory,'log_SPOD')
             
                              
         global DATA_INPUT_METHOD 
@@ -294,28 +399,39 @@ def main():
         dts = np.diff(TIME)
         dt = np.mean(np.diff(TIME))
             
-        freq = fftfreq(N_FFT,dt)
-        fs = 1.0/dt
-        
-        print("SPECTRAL POD data:")
-        print("------------------------------------------------------------------")
+        freqs = fftfreq(N_FFT,dt)[0:N_FFT//2] # Only the positive side of the spectrum is considered
 
-        print("   Start time                     = {} s ".format(TIME[0]))
-        print("   End time                       = {} s ".format(TIME[-1]))
-        print("   Number of samples              = {}   ".format(N))
-        print("   Number of blocks               = {}   ".format(N_BLOCKS))
-        print("   Number of points per block     = {}   ".format(N_FFT))
-        print("   Min delta t                    = {} s ".format(min(dts)))
-        print("   Max delta t                    = {} s ".format(max(dts)))
-        print("   Avg delta t                    = {} s ".format(dt))
-        print("   Sampling frequency             = {} Hz".format(fs))
-        print("   Nyquist frequency              = {} Hz".format(fs/2.0))
-        print("   Frequency resolution           = {} Hz".format(fs/N_FFT)) 
-        print("   Input method                   = {}   ".format(DATA_INPUT_METHOD)) 
-        print("   Results directory              = {}   ".format(resultsDirectory))
-        print("   Number of processes            = {}   ".format(nprocs))
-     
-        print("------------------------------------------------------------------")
+        freqs_split,freq_counts = splitListIntoChunks(freqs)
+
+        #freqs_perProc = comm.scatter(parts)
+
+        fs = 1.0/dt
+
+        confidence = 0.95
+
+        lb,ub = calc_confidenceBounds(N_BLOCKS)
+        
+        Info("SPECTRAL POD data:")
+        Info("------------------------------------------------------------------")
+
+        Info( "   Start time                                 = {} s ".format(TIME[0]))
+        Info( "   End time                                   = {} s ".format(TIME[-1]))
+        Info( "   Number of samples                          = {}   ".format(N))
+        Info( "   Number of blocks                           = {}   ".format(N_BLOCKS))
+        Info( "   Number of points per block                 = {}   ".format(N_FFT))
+        Info( "   Min delta t                                = {} s ".format(min(dts)))
+        Info( "   Max delta t                                = {} s ".format(max(dts)))
+        Info( "   Avg delta t                                = {} s ".format(dt))
+        Info( "   Sampling frequency                         = {} Hz".format(fs))
+        Info( "   Nyquist frequency                          = {} Hz".format(fs/2.0))
+        Info( "   Frequency resolution                       = {} Hz".format(fs/N_FFT)) 
+        Info( "   Input method                               = {}   ".format(DATA_INPUT_METHOD)) 
+        Info( "   Results directory                          = {}   ".format(resultsDirectory))
+        Info( "   Number of processes                        = {}   ".format(nprocs))
+        Info( "   Lower relative confidence bound ({}%)      = {}   ".format(int(100*confidence),lb))
+        Info( "   Upper relative confidence bound ({}%)      = {}   ".format(int(100*confidence),ub))
+  
+        Info("------------------------------------------------------------------")
     
         #answer = input("If satisfied with frequency resolution, continue y/n?  ")
         answer = "y"    
@@ -324,21 +440,31 @@ def main():
             sys.exit()
         
         start = time.perf_counter()
-        print(f'Readinng {len(timePaths)} files with {nprocs} processors')
+        Info(f'Readinng {len(timePaths)} files with {nprocs} processors')
         split_file_list = np.array_split(timePaths, size)
     else:
         split_file_list = None
         DATA_INPUT_METHOD = None
         N_FFT = None
         N_BLOCKS = None
-        freq = None
+        freqs = None
+        freqs_split,freq_counts = None,None
+        resultsDirectory = None
+
+
+    resultsDirectory = comm.bcast(resultsDirectory,root = 0)
+
+
+    
 
     local_files = comm.scatter(split_file_list, root=0) # Scatter the list of files for each processor to read
     DATA_INPUT_METHOD = comm.bcast(DATA_INPUT_METHOD, root=0)
-    freq = comm.bcast(freq, root=0)
+    freqs = comm.bcast(freqs, root=0)
 
     N_FFT = comm.bcast(N_FFT, root=0)
     N_BLOCKS = comm.bcast(N_BLOCKS, root=0)
+
+    freqs_perProc = comm.scatter(freqs_split,root = 0)
 
     # ***********************************************************************************************
     #
@@ -358,43 +484,44 @@ def main():
         Q.append(getattr(DATA_INPUT_FUNCTIONS,DATA_INPUT_METHOD)(timePath))
     Q= np.stack(Q,axis = 1).astype(np.float64)
 
-    #print(f"For processor {rank}, chunk size before distribution is {Q.shape}")
     Q = distribute2DColumnChunksToRowChunks(Q)
-
-    #print(f"For processor {rank}, chunk size after distribution is {Q.shape}")
 
     chunkSizes = comm.gather(sys.getsizeof(Q),root=0)
     comm.barrier()
-    if rank ==0 : print(f"Done. Total size of the data matrix: {sum(chunkSizes)/(1024*1024)} MB")
+    if rank ==0 : 
+        totalSizeInMB = sum(chunkSizes)/(1024*1024)
+    else:
+        totalSizeInMB = None
+
+    Info(f"Done. Total size of the data matrix: {totalSizeInMB} MB")
 
     # Calculate and subtract mean, calculate variance:
     # ***********************************************
-    if rank ==0 : print(f"Calculating mean and variance, subtracting mean...")
-    Qmean = Q.mean(axis=1)
-    Qvar = np.var(Q,axis = 1)
-    
-    Q -= Q.mean(axis=1,keepdims = True)
-    
-    Qmean = np.array( comm.gather(Qmean,root = 0) )
+    Info(f"Calculating mean and variance, subtracting mean...")
 
-    Qvar = np.array( comm.gather(Qvar,root = 0) )
+
+    Qmean = Q.mean(axis=1).reshape((-1,1))
+    Qvar = np.var(Q,axis = 1).reshape((-1,1))
+    Q -= Q.mean(axis=1,keepdims = True)
+
+    Qmean = np.array( comm.gather(Qmean,root = 0),dtype = object)
+    Qvar = np.array( comm.gather(Qvar,root = 0),dtype = object )
     
     if rank == 0 : 
     
         Qmean = np.concatenate(Qmean)
         Qvar = np.concatenate(Qvar)
-    
-        print("Done. Saving Mean...")
-        np.save(os.path.join(resultsDirectory,"MeanField"),Qmean)
-        
-        print("Done. Saving Variance...")
-        np.save(os.path.join(resultsDirectory,"VarianceField"),Qvar)
 
-        print("Done. Saving coordinates...")
+        Info("Done. Saving coordinates...")
         XYZ = getattr(DATA_INPUT_FUNCTIONS,DATA_INPUT_METHOD)(local_files[0],returnOnlyCoordinates = True)
         np.save(os.path.join(resultsDirectory,"XYZ_Coordinates"), XYZ)
+    
+        Info("Done. Saving Mean...")
+        np.save(os.path.join(resultsDirectory,"MeanField"),Qmean)
+        
+        Info("Done. Saving Variance...")
+        np.save(os.path.join(resultsDirectory,"VarianceField"),Qvar)
 
-    # Send Q back to processor 0
 
     # ***********************************************************************************************
     #
@@ -402,116 +529,107 @@ def main():
     #
     # ***********************************************************************************************
 
-    if rank ==0 : print("Done. Creating and re-chunking the windowed spectral-density..")
+    Info("Done. Creating and re-chunking the windowed spectral-density..")
 
     Qhat = fftChunkWindowed(np.stack([Q[:,i*N_FFT//2: (i+2)*N_FFT//2] for i in range(N_BLOCKS)],axis = 2)) # This will reduce the number of dimensions, due to the Nyquist frequency
     del Q
-    #print(f"On processor {rank}, shape of X is {X.shape}")
+
+    Qhat_r = distribute3DRowChunksToColumnChunks(Qhat[:,0:N_FFT//2,:].real) # This will re-distribute real part of Qhat into colmn chunks of shape: 
+
+    Qhat_i = distribute3DRowChunksToColumnChunks(Qhat[:,0:N_FFT//2,:].imag) # This will re-distribute real part of Qhat into colmn chunks of shape: 
+
+    Qhat = Qhat_r + 1j*Qhat_i
+
+    del Qhat_r,Qhat_i
+
+    m,n,k = Qhat.shape
+
 
     # ***********************************************************************************************
     #
-    #     Compute eigenvalues   
+    #     Compute SPOD modes, then eigenvalues, and then, save largest ones
+    #
+    # ***********************************************************************************************  
+
+
+    PHI = []
+    EigenValuesPerProc = []
+
+
+    Info("Done. Calculating SPOD modes")
+    for j in range(0,len(freqs_perProc)): # Loop around all frequencies, whose modes are calculated on this processor
+        Phi, Sig,Vh = svd(Qhat[:,j,:], full_matrices=False) 
+        PHI.append(Phi)
+        EigenValuesPerProc.append(np.transpose(np.array(Sig)**2))
+
+    PHI = np.stack(PHI,axis = 2)
+    EigenValuesPerProc = np.vstack(EigenValuesPerProc)
+
+    Info(f"Finding and saving SPOD modes with {maxModes} largest eigenvalues")
+    EigenValues = comm.gather(EigenValuesPerProc,root = 0) # Gather all eigenvalues to root
+
+    if rank ==0:
+        EigenValues = np.vstack(EigenValues) # EigenValues for all frequencies 
+
+        Info("Savign EigenValues...")
+        np.save(os.path.join(resultsDirectory,"EigenValues"),EigenValues)
+        Info("Done.")
+
+        Info("Saving all frequencies...")
+        np.save(os.path.join(resultsDirectory,"Frequencies"),freqs)
+
+        sorted_ind = np.argsort(np.sum(EigenValues,axis = 1))[::-1]
+
+        sorted_ind = sorted_ind[0:maxModes] # Only first maxModes modes will be written
+
+        freqs_to_write = freqs[sorted_ind]
+    else:
+        EigenValues = None 
+        sorted_ind = None 
+        freqs_to_write = None
+
+    EigenValues = comm.bcast(EigenValues,root = 0)
+    sorted_ind = comm.bcast(sorted_ind,root = 0)
+    freqs_to_write = comm.bcast(freqs_to_write,root = 0)
+
+
+    for ind,f in enumerate(freqs_to_write):
+        if f in freqs_perProc:
+            j = np.where(freqs_perProc==f)[0]
+            U = PHI[:,:,j]
+            m1,n1,k1 = U.shape
+            U = U.reshape(m1,n1)
+            Info(f"Processor {rank}: Saving mode {ind} on frequency {f}")
+            np.save(os.path.join(resultsDirectory,"Mode_{}_f_{}".format(ind,f)),U)
+
+
+    # ***********************************************************************************************
+    #
+    #     Compute similarity matrix for the first SPOD modes
     #
     # ***********************************************************************************************      
 
-    if rank ==0 : print("Done. Calculating eigenvalues...")
+    Info("Computing similarity matrix for the first modes on all frequencies")
 
-    m,n,nb = Qhat.shape
-    
-    Cp = [] # Covarince matrix for all frequencies for all processors
-    
-    # We will compute eigenvalues for each frequency
-    for j in range(0,n):
-    	QQ = Qhat[:,j,:].reshape(m,nb)
-    	Cj = np.transpose(np.conj(QQ)).dot(QQ) # Calculate covariance matrix for the frequency j
-    	Cp.append(Cj)
-    Cp = np.stack(Cp,axis = 2)
+    PHI1 = PHI[:,0,:]
+    # Re-distribute again row-wise
+    PHI1_real = distribute2DColumnChunksToRowChunks(PHI1.real)  
+    PHI1_imag = distribute2DColumnChunksToRowChunks(PHI1.imag)  
 
-    C = None
-    C = comm.gather(Cp,root = 0)
-
-    #if rank == 0: print(f'C = {C}')
-
-    #if rank == 0: print(f'C.shape = {C.shape}')
-
-    
-    EigenValues = []
-
-    if rank ==0 : 
-        C = sum(C) # Covariance matrix with shape Nblk x Nblk x N_FFT//2
-        n1,n2,nFreq = C.shape
-
-        for j in range(0,N_FFT//2):
-            eigs = np.array( sorted(eigvalsh(C[:,:,j].reshape(n1,n2)),reverse = True) )
-            EigenValues.append(eigs)
-
-        EigenValues = np.stack(EigenValues,axis = 0)
-
-        np.save(os.path.join(resultsDirectory,"EigenValues"),EigenValues)
-        print("Done.")
-
-        print("Saving Frequencies...")
-        np.save(os.path.join(resultsDirectory,"Frequencies"),freq[0:EigenValues.shape[0]])
+    PHI1 = PHI1_real + 1j*PHI1_imag
 
 
-        '''
-        colors = ['r','b','g','k']
-        plt.figure()
-        for kk in range(0,n2):
-            plt.plot(freq[0:EigenValues.shape[0]],EigenValues[:,kk],colors[kk])
+    S = abs(np.transpose(np.conj(PHI1)).dot(PHI1))
+
+    SimilarityMatrix = comm.gather(S,root = 0)
+
+    if rank ==0:
+        SimilarityMatrix = sum(SimilarityMatrix)
+        Info(f"Processor {rank}: Saving similarity matrix for the first SPOD modes on all frequencies")
+        np.save(os.path.join(resultsDirectory,"SimilarityMatrix"),SimilarityMatrix)
 
 
-        plt.xlim(0,100)
-        plt.grid()
-        plt.show()
-        '''
-
-        
-        BiggestEigs = EigenValues[:,0]
-        indx = np.argsort(-1*BiggestEigs) 
-
-    else:
-        indx = None
-
-    indx  = comm.bcast(indx ,root = 0)
-    #if rank ==1 : print(indx)
-
-    # ***********************************************************************************************
-    #
-    #     Compute SPOD modes with largest eigenvalues  
-    #
-    # ***********************************************************************************************     
-
-    maxModes = 40
-    
-    
-    if rank == 0: print(f"Saving first {maxModes} with largest eigenvalues, change the variable maxModes when needed")
-
-    for i in range(0,maxModes):
-
-        ind = indx[i]
-
-        Qhati  = Qhat[:,ind,:]
-
-        # Since the passing the complex numbers through mpi.comm is not trivial, we well assemble them separately
-
-        QhatiReal = gather2DDataToRoot(Qhati.real)
-        QhatiImag = gather2DDataToRoot(Qhati.imag)
-
-
-        if rank ==0:
-            Qhati = np.array(QhatiReal+1j*QhatiImag)
-            #print(Qhati)
-
-            print("Calculating and saving spatial modes on a frequency {} Hz ...".format(freq[ind]))
-
-            t1 = time.perf_counter()
-            Phi, Sig,Vh = svd(Qhati, full_matrices=False)    
-            #print(f"Total shape and size of the Modeare: {Phi.shape} and {sys.getsizeof(Phi)/(1024*1024)} MB")
-            np.save(os.path.join(resultsDirectory,"Mode_{}_f_{}".format(i,freq[ind])),Phi)
-            t2 = time.perf_counter()
-            print(f'Done in {t2-t1} sec')
-           
+    Info("All done.")
         
 if __name__ == "__main__":
     main()   
