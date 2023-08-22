@@ -14,11 +14,13 @@ import shutil
 import argparse
 import math
 from tqdm import tqdm
-from scipy.signal import hann
-
-from numpy.linalg import eigvalsh
+from scipy.signal import hann,welch
+from scipy.fft import rfft,rfftfreq
+#from numpy.linalg import eigvalsh
 
 from scipy.linalg import svd
+
+from numpy.linalg import eig 
 
 from tqdm import tqdm
 
@@ -31,10 +33,16 @@ DATA_INPUT_METHOD = "foo"
 global comm 
 global nprocs
 global maxModes 
+global dt
+global N_FFT
+global availableWindowingFunctions
 
 maxModes = 60
 
 nprocs = 1 # Global variable
+#N_FFT = 1
+dt = 1
+availableWindowingFunctions = {'Hamming':1.85,'Hanning':2.0,'Blackman':2.80}   
 
 def calc_confidenceBounds(Nb,confidence = 0.99):
     from scipy.stats import chi2
@@ -86,10 +94,6 @@ def distribute2DColumnChunksToRowChunks(A):
 
         cols = comm.gather(n,root=0)
         cols = comm.bcast(cols,root=0) # How many columns are there on each processor
-
-        #if rank ==1:
-        #    print(f"On processor 1, cols = {cols}")
-
 
         for i in range(0,nprocs):
                 if rank == i:
@@ -196,17 +200,17 @@ def gather2DDataToRoot(Qhati):
 def Info(string):
         if rank ==0:
                 print(string)
-                f = open(logFile,'a')
-                f.write(string)
-                f.write('\n')
-                f.close()
+                #f = open(logFile,'a')
+                #f.write(string)
+                #f.write('\n')
+                #f.close()
 
 
 
 class DATA_INPUT_FUNCTIONS:
 
     def readScalar(path,returnOnlyCoordinates = False):
-        data = np.genfromtxt(path,delimiter=None,skip_header=0)
+        data = np.genfromtxt(path,delimiter=None,skip_header=1)
         #print(path)
         if not returnOnlyCoordinates:
             return data[:,-1]
@@ -238,32 +242,40 @@ def dataInput(path):
     return getattr(DATA_INPUT_FUNCTIONS, DATA_INPUT_METHOD)(path)
 
 
-
-def fftChunk(chunk):
-
-    if(len(chunk.shape) == 2):
-
-        #print("Two dimensional matrix,after transposing ",chunk.shape)
-        chunk = np.expand_dims(chunk,axis = 2)
-        chunk = np.swapaxes(chunk,1,2)
-        chunk = np.swapaxes(chunk,0,1)
-
-    M,N,B = chunk.shape
-    #print("In fftChunk, chunk.shape = ",chunk.shape)
-    yf = fft(chunk,axis = 1)
-    return (1/N)*yf[:,0:N//2]
-
-def fftChunkWindowed(chunk):
+def fftChunkWindowed(chunk,dt,nfft,window):
 
     M,N,B = chunk.shape
 
-    W = np.hanning(N) # Hanning window
+    amplitudeCorrectionFactor = availableWindowingFunctions[window]
+
+    #print(f"On processor {rank}, window = {window}, with the amplitudeCorrectionFactor = {amplitudeCorrectionFactor}")
+
+    if window == 'Hamming':
+        W = np.hamming(N) # Hanning window
+
+    elif window == 'Hanning':
+        W = np.hanning(N) # Hanning window
+
+    elif window == 'Blackman':
+        W = np.blackman(N) # Hanning window
+
+    # Scaling coefficient for the amplitude due to the rfft:
+    if N%2 ==0:
+        nScale = (N/2)+1
+    else:
+        nScale = (N+1)/2
+
+
     W = np.stack([W for i in range(M)],axis = 0)
     W = np.stack([W for i in range(B)],axis = 2)
 
-    #print("In fftChunk, chunk.shape = ",chunk.shape)
-    yf = fft(W*chunk,axis = 1)
-    return (1/N)*yf[:,0:N//2,:]
+    chunk_fft = np.abs(rfft(W*chunk,axis = 1,n = nfft*N))
+
+    freqs = rfftfreq(nfft*N,d = dt)
+
+    chunk_amplitude = amplitudeCorrectionFactor*chunk_fft/nScale
+
+    return freqs, chunk_amplitude
 
 
 def main():
@@ -290,7 +302,7 @@ def main():
         rank = 0
         nprocs = 1
 
-        
+     
 
     if(rank ==0):
         
@@ -307,8 +319,10 @@ def main():
         ap.add_argument("-t0", "--timeStart", required=False,help="Time from which to start")
         ap.add_argument("-t1", "--timeFinish", required=False,help="Time with which to finish")
         ap.add_argument("-s", "--step", required=False,help="Sampling step")
-        ap.add_argument("-n", "--NBLOCKS", required=False,help="Number of blocks to for Welch transformation")
-        
+        ap.add_argument("-n", "--nBlocks", required=False,help="Number of blocks to for Welch transformation")
+        ap.add_argument("-nfft", "--N_FFT", required=False,help="Multiplicator of the time-dimension for zero-padding")        
+        ap.add_argument("-w", "--window", required=False,help="Windowing function, default = Hamming")        
+
         args = vars(ap.parse_args())
         
         # Parse input arguments
@@ -339,10 +353,10 @@ def main():
         DATA_INPUT_METHOD = str(args['inputMethod'])
         
         if(DATA_INPUT_METHOD not in dir(DATA_INPUT_FUNCTIONS)):
-            print("ERROR: " + DATA_INPUT_METHOD + " is not among data input functions:")
+            print("SPOD ERROR: " + DATA_INPUT_METHOD + " is not among data input functions:")
             [print(d) for d in dir(DATA_INPUT_FUNCTIONS) if d.startswith('__') is False]
-            print("Change name or modify DATA_INPUT_FUNCTIONS class at the start of the code")
-            sys.exit()
+            print("SPOD ERROR: Change name or modify DATA_INPUT_FUNCTIONS class at the start of the code")
+            comm.Abort()
                                                 
         try:
             TSTART = float(args['timeStart'])
@@ -355,7 +369,7 @@ def main():
             TEND = 1e80
 
         try:
-            N_BLOCKS = int(args['NBLOCKS'])
+            N_BLOCKS = int(args['nBlocks'])
         except:
             N_BLOCKS = 1
 
@@ -364,6 +378,25 @@ def main():
         except:
             STEP = 1
 
+        try:
+            N_FFT = int(args['N_FFT'])
+        except:
+            N_FFT = 4
+
+        try:
+            WINDOW = args['window']
+        except:
+            WINDOW = 'Hamming'
+
+        
+
+        if WINDOW not in list(availableWindowingFunctions.keys()):
+            print(f"SPOD ERROR: {WINDOW} is not in the list of available windowing functions: {list(availableWindowingFunctions.keys())}")
+            comm.Abort()
+        else:
+            pass
+
+
         #**********************************************************************************
         #**********************************************************************************
         #
@@ -371,10 +404,26 @@ def main():
         #
         #**********************************************************************************
         #**********************************************************************************
+
+        def is_float(value):
+            try:
+                float(value)
+                return True
+            except ValueError:
+                return False
+
+        def is_numeric_dir(directory_path, item):
+            item_path = os.path.join(directory_path, item)
+            return os.path.isdir(item_path) and (item.isdigit() or is_float(item))
             
-        #timeFiles =  [float(t) for t in os.listdir(directory) if float(t) >= TSTART and float(t) <= TEND]
-        timeFilesUnsorted =  set([t for t in os.listdir(directory) if float(t) >= TSTART and float(t) <= TEND])
-            
+        def list_numeric_directories(directory_path):
+            numeric_dirs = [item for item in os.listdir(directory_path) if is_numeric_dir(directory_path, item)]
+            return numeric_dirs
+
+        time_directories = list_numeric_directories(directory)
+
+        timeFilesUnsorted =  set([t for t in time_directories if (float(t) >= TSTART and float(t) <= TEND)])
+    
         timeFilesStr = sorted(timeFilesUnsorted, key=lambda x: float(x))
         
         timeFilesStr = timeFilesStr[::STEP]
@@ -384,27 +433,20 @@ def main():
         if(TEND > timeFiles[-1]):
             TEND =  timeFiles[-1]
         
-        N_FFT = round(math.floor(2*len(timeFiles)/(N_BLOCKS+1)))
+        N_PER_BLOCK = round(math.floor(2*len(timeFiles)/(N_BLOCKS+1)))
         
-        N = min(len(timeFiles),round(0.5*N_FFT*(N_BLOCKS+1)))
+        N = min(len(timeFiles),round(0.5*N_PER_BLOCK *(N_BLOCKS+1)))
 
         timeFiles = timeFiles[0:N]
         timeFilesStr = timeFilesStr[0:N]
         
         TIME = timeFiles
-        timePaths = [os.path.join(directory,str(t),name) for t in timeFilesStr]
-        
+        timePaths = [os.path.join(directory,str(t),name) for t in timeFilesStr]    
 
         # At this point, prompt user 
         dts = np.diff(TIME)
         dt = np.mean(np.diff(TIME))
             
-        freqs = fftfreq(N_FFT,dt)[0:N_FFT//2] # Only the positive side of the spectrum is considered
-
-        freqs_split,freq_counts = splitListIntoChunks(freqs)
-
-        #freqs_perProc = comm.scatter(parts)
-
         fs = 1.0/dt
 
         confidence = 0.95
@@ -418,13 +460,15 @@ def main():
         Info( "   End time                                   = {} s ".format(TIME[-1]))
         Info( "   Number of samples                          = {}   ".format(N))
         Info( "   Number of blocks                           = {}   ".format(N_BLOCKS))
-        Info( "   Number of points per block                 = {}   ".format(N_FFT))
+        Info( "   Number of points per block                 = {}   ".format(N_PER_BLOCK ))
         Info( "   Min delta t                                = {} s ".format(min(dts)))
         Info( "   Max delta t                                = {} s ".format(max(dts)))
         Info( "   Avg delta t                                = {} s ".format(dt))
         Info( "   Sampling frequency                         = {} Hz".format(fs))
         Info( "   Nyquist frequency                          = {} Hz".format(fs/2.0))
-        Info( "   Frequency resolution                       = {} Hz".format(fs/N_FFT)) 
+        Info( "   Frequency resolution                       = {} Hz".format(fs/N_PER_BLOCK )) 
+        Info( "   Applied windowing function                 = {}   ".format(WINDOW)) 
+        Info( "   Relative increase with zero-padding        = {}   ".format(N_FFT)) 
         Info( "   Input method                               = {}   ".format(DATA_INPUT_METHOD)) 
         Info( "   Results directory                          = {}   ".format(resultsDirectory))
         Info( "   Number of processes                        = {}   ".format(nprocs))
@@ -437,7 +481,7 @@ def main():
         answer = "y"    
         if( answer not in ["y","Y","yes","Yes","z","Z"]):
             print("OK, exiting calculation")
-            sys.exit()
+            comm.Abort()
         
         start = time.perf_counter()
         Info(f'Readinng {len(timePaths)} files with {nprocs} processors')
@@ -447,9 +491,12 @@ def main():
         DATA_INPUT_METHOD = None
         N_FFT = None
         N_BLOCKS = None
+        N_PER_BLOCK = None
         freqs = None
         freqs_split,freq_counts = None,None
         resultsDirectory = None
+        dt = None
+        WINDOW = None
 
 
     resultsDirectory = comm.bcast(resultsDirectory,root = 0)
@@ -459,12 +506,16 @@ def main():
 
     local_files = comm.scatter(split_file_list, root=0) # Scatter the list of files for each processor to read
     DATA_INPUT_METHOD = comm.bcast(DATA_INPUT_METHOD, root=0)
-    freqs = comm.bcast(freqs, root=0)
+    #freqs = comm.bcast(freqs, root=0)
 
-    N_FFT = comm.bcast(N_FFT, root=0)
+    N_PER_BLOCK  = comm.bcast(N_PER_BLOCK , root=0)
+    N_FFT  = comm.bcast(N_FFT , root=0)
     N_BLOCKS = comm.bcast(N_BLOCKS, root=0)
+    WINDOW = comm.bcast(WINDOW, root=0)
 
-    freqs_perProc = comm.scatter(freqs_split,root = 0)
+    
+
+    dt = comm.bcast(dt,root = 0)
 
     # ***********************************************************************************************
     #
@@ -479,7 +530,6 @@ def main():
     else:
         Range = local_files
 
-    #for timePath in tqdm(local_files):
     for timePath in Range:
         Q.append(getattr(DATA_INPUT_FUNCTIONS,DATA_INPUT_METHOD)(timePath))
     Q= np.stack(Q,axis = 1).astype(np.float64)
@@ -499,15 +549,32 @@ def main():
     # ***********************************************
     Info(f"Calculating mean and variance, subtracting mean...")
 
-
     Qmean = Q.mean(axis=1).reshape((-1,1))
     Qvar = np.var(Q,axis = 1).reshape((-1,1))
     Q -= Q.mean(axis=1,keepdims = True)
 
+    mm,nn = Q.shape
+    Plocal = np.sum(Q*Q,axis = 1)/nn # On average, what power do all the signals have, per procerror
+
     Qmean = np.array( comm.gather(Qmean,root = 0),dtype = object)
     Qvar = np.array( comm.gather(Qvar,root = 0),dtype = object )
+
+    Ptotal = np.array(comm.gather(Plocal,root = 0),dtype = object) # On average, what power do all the signals have
+
+    Ptotal_VolumeAveraged = None
     
     if rank == 0 : 
+
+        Ptotal = np.concatenate(Ptotal)
+
+        mm = len(Ptotal)
+
+        Ptotal = np.sum(Ptotal)
+
+        Ptotal_VolumeAveraged = Ptotal/mm
+
+        Info(f"Total power = {Ptotal}")
+        Info(f"Total power, volume averaged = {Ptotal_VolumeAveraged}")
     
         Qmean = np.concatenate(Qmean)
         Qvar = np.concatenate(Qvar)
@@ -522,7 +589,8 @@ def main():
         Info("Done. Saving Variance...")
         np.save(os.path.join(resultsDirectory,"VarianceField"),Qvar)
 
-
+    Ptotal = comm.bcast(Ptotal , root=0)  
+    Ptotal_VolumeAveraged = comm.bcast(Ptotal_VolumeAveraged , root=0)  
     # ***********************************************************************************************
     #
     #     Calculate spectral-density matrix   
@@ -531,48 +599,82 @@ def main():
 
     Info("Done. Creating and re-chunking the windowed spectral-density..")
 
-    Qhat = fftChunkWindowed(np.stack([Q[:,i*N_FFT//2: (i+2)*N_FFT//2] for i in range(N_BLOCKS)],axis = 2)) # This will reduce the number of dimensions, due to the Nyquist frequency
+    freqs,Qhat = fftChunkWindowed(np.stack([Q[:,i*N_PER_BLOCK //2: (i+2)*N_PER_BLOCK //2] for i in range(N_BLOCKS)],axis = 2),dt = dt,nfft = N_FFT,window = WINDOW) # This will reduce the number of dimensions, due to the Nyquist frequency
     del Q
 
-    Qhat_r = distribute3DRowChunksToColumnChunks(Qhat[:,0:N_FFT//2,:].real) # This will re-distribute real part of Qhat into colmn chunks of shape: 
+    Qhat_r = distribute3DRowChunksToColumnChunks(Qhat.real) # This will re-distribute real part of Qhat into colmn chunks of shape: 
 
-    Qhat_i = distribute3DRowChunksToColumnChunks(Qhat[:,0:N_FFT//2,:].imag) # This will re-distribute real part of Qhat into colmn chunks of shape: 
+    Qhat_i = distribute3DRowChunksToColumnChunks(Qhat.imag) # This will re-distribute real part of Qhat into colmn chunks of shape: 
 
     Qhat = Qhat_r + 1j*Qhat_i
 
     del Qhat_r,Qhat_i
 
     m,n,k = Qhat.shape
-
-
+    
     # ***********************************************************************************************
     #
     #     Compute SPOD modes, then eigenvalues, and then, save largest ones
     #
     # ***********************************************************************************************  
 
+    freqs_split,freq_counts = splitListIntoChunks(freqs)
+
+    freqs_perProc = comm.scatter(freqs_split,root = 0)
 
     PHI = []
     EigenValuesPerProc = []
-
+    CoeffsPerProc = []
 
     Info("Done. Calculating SPOD modes")
     for j in range(0,len(freqs_perProc)): # Loop around all frequencies, whose modes are calculated on this processor
+        QQ = Qhat[:,j,:]
+        mm,kk = QQ.shape
+
         Phi, Sig,Vh = svd(Qhat[:,j,:], full_matrices=False) 
+
+        eigvals = (Sig**2)/mm
+
+        Sig = np.matrix(np.diag(Sig))
+
+        coeffs = np.array(np.dot(Sig,Vh)) # Coefficients to multiply modes
+           
         PHI.append(Phi)
-        EigenValuesPerProc.append(np.transpose(np.array(Sig)**2))
+
+        EigenValuesPerProc.append(np.transpose(np.array(eigvals)))
+
+        CoeffsPerProc.append(coeffs)
 
     PHI = np.stack(PHI,axis = 2)
     EigenValuesPerProc = np.vstack(EigenValuesPerProc)
 
+    CoeffsPerProc = np.stack(CoeffsPerProc,axis = 2)
+
     Info(f"Finding and saving SPOD modes with {maxModes} largest eigenvalues")
     EigenValues = comm.gather(EigenValuesPerProc,root = 0) # Gather all eigenvalues to root
 
-    if rank ==0:
-        EigenValues = np.vstack(EigenValues) # EigenValues for all frequencies 
+    Coeffs = comm.gather(CoeffsPerProc,root = 0) # Gather all coeffs to root
 
-        Info("Savign EigenValues...")
+    if rank ==0:
+
+        EigenValues = np.vstack(EigenValues)/N_BLOCKS # EigenValues for all frequencies 
+
+        Coeffs = np.concatenate(Coeffs,axis = 2)
+
+        Info("Saving EigenValues...")
         np.save(os.path.join(resultsDirectory,"EigenValues"),EigenValues)
+        Info("Done.")
+
+        Info("Saving Coefficients...")
+        np.save(os.path.join(resultsDirectory,"Coefficients"),Coeffs)
+        Info("Done.")
+
+        print(f"Ptotal_VolumeAveraged = {Ptotal_VolumeAveraged}")
+
+        PSD = 0.5*np.abs(EigenValues/Ptotal_VolumeAveraged)
+        
+        Info("Saving PSD per frequency...")
+        np.save(os.path.join(resultsDirectory,"PSD"),PSD)
         Info("Done.")
 
         Info("Saving all frequencies...")
@@ -599,7 +701,7 @@ def main():
             U = PHI[:,:,j]
             m1,n1,k1 = U.shape
             U = U.reshape(m1,n1)
-            Info(f"Processor {rank}: Saving mode {ind} on frequency {f}")
+            print(f"Processor {rank}: Saving mode {ind} on frequency {f}")
             np.save(os.path.join(resultsDirectory,"Mode_{}_f_{}".format(ind,f)),U)
 
 
