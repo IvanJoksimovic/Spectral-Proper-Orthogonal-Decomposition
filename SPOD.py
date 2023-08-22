@@ -1,27 +1,15 @@
 from mpi4py import MPI
-import numpy as np
 import argparse
 import numpy as np
 import os
 import time
-from pathlib import Path
-from concurrent.futures import ProcessPoolExecutor as Executor
-import numpy as np
-from numpy.fft import fft,fftfreq 
-import matplotlib.pyplot as plt
 import sys
 import shutil
 import argparse
 import math
 from tqdm import tqdm
-from scipy.signal import hann,welch
-from scipy.fft import rfft,rfftfreq
-#from numpy.linalg import eigvalsh
-
-from scipy.linalg import svd
-
-from numpy.linalg import eig 
-
+from scipy.fft import rfft,rfftfreq,fft,fftfreq
+from scipy.linalg import svd,eig
 from tqdm import tqdm
 
 
@@ -269,7 +257,9 @@ def fftChunkWindowed(chunk,dt,nfft,window):
     W = np.stack([W for i in range(M)],axis = 0)
     W = np.stack([W for i in range(B)],axis = 2)
 
-    chunk_fft = np.abs(rfft(W*chunk,axis = 1,n = nfft*N))
+    nfft = 1
+    #chunk_fft = np.abs(rfft(W*chunk,axis = 1))#,n = nfft*N))
+    chunk_fft = rfft(W*chunk,axis = 1)#,n = nfft*N))
 
     freqs = rfftfreq(nfft*N,d = dt)
 
@@ -629,7 +619,9 @@ def main():
     Info("Done. Calculating SPOD modes")
     for j in range(0,len(freqs_perProc)): # Loop around all frequencies, whose modes are calculated on this processor
         QQ = Qhat[:,j,:]
+
         mm,kk = QQ.shape
+        # First way, using svd decopmosition
 
         Phi, Sig,Vh = svd(Qhat[:,j,:], full_matrices=False) 
 
@@ -638,7 +630,23 @@ def main():
         Sig = np.matrix(np.diag(Sig))
 
         coeffs = np.array(np.dot(Sig,Vh)) # Coefficients to multiply modes
-           
+        ''' 
+        # Second way, using method of snapshots
+        C = np.dot(np.conjugate(QQ).T,QQ)
+
+        eigvals, Psi = eig(C)
+
+        ind = np.argsort(np.abs(eigvals))[::-1]
+
+        eigvals = eigvals[ind]
+        Psi = Psi[:,ind]
+
+        Phi = np.dot(QQ,Psi)
+
+        coeffs = np.dot(np.conjugate(Phi).T,QQ)
+        '''
+
+        
         PHI.append(Phi)
 
         EigenValuesPerProc.append(np.transpose(np.array(eigvals)))
