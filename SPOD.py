@@ -188,10 +188,10 @@ def gather2DDataToRoot(Qhati):
 def Info(string):
         if rank ==0:
                 print(string)
-                #f = open(logFile,'a')
-                #f.write(string)
-                #f.write('\n')
-                #f.close()
+                f = open(logFile,'a')
+                f.write(string)
+                f.write('\n')
+                f.close()
 
 
 
@@ -257,9 +257,9 @@ def fftChunkWindowed(chunk,dt,nfft,window):
     W = np.stack([W for i in range(M)],axis = 0)
     W = np.stack([W for i in range(B)],axis = 2)
 
-    nfft = 1
+    #nfft = 1
     #chunk_fft = np.abs(rfft(W*chunk,axis = 1))#,n = nfft*N))
-    chunk_fft = rfft(W*chunk,axis = 1)#,n = nfft*N))
+    chunk_fft = rfft(W*chunk,axis = 1,n = nfft*N)
 
     freqs = rfftfreq(nfft*N,d = dt)
 
@@ -312,6 +312,7 @@ def main():
         ap.add_argument("-n", "--nBlocks", required=False,help="Number of blocks to for Welch transformation")
         ap.add_argument("-nfft", "--N_FFT", required=False,help="Multiplicator of the time-dimension for zero-padding")        
         ap.add_argument("-w", "--window", required=False,help="Windowing function, default = Hamming")        
+        ap.add_argument("-b", "--binWidth", required=False,help="Width of the bin, in which the modes with maximum eigenvalues will be exported")   
 
         args = vars(ap.parse_args())
         
@@ -371,14 +372,21 @@ def main():
         try:
             N_FFT = int(args['N_FFT'])
         except:
-            N_FFT = 4
+            N_FFT = 1
 
         try:
             WINDOW = args['window']
         except:
-            WINDOW = 'Hamming'
+            pass
 
-        
+        if WINDOW == None: WINDOW = 'Hanning'
+
+        try:
+            bin_width = float(args['binWidth'])
+        except:
+            bin_width = 5.
+
+        #print(f"On processor {rank}, WINDOW = {WINDOW}")
 
         if WINDOW not in list(availableWindowingFunctions.keys()):
             print(f"SPOD ERROR: {WINDOW} is not in the list of available windowing functions: {list(availableWindowingFunctions.keys())}")
@@ -442,6 +450,9 @@ def main():
         confidence = 0.95
 
         lb,ub = calc_confidenceBounds(N_BLOCKS)
+
+        if bin_width < fs/(N_FFT*N_PER_BLOCK):
+            bin_width = fs/(N_FFT*N_PER_BLOCK)
         
         Info("SPECTRAL POD data:")
         Info("------------------------------------------------------------------")
@@ -451,16 +462,18 @@ def main():
         Info( "   Number of samples                          = {}   ".format(N))
         Info( "   Number of blocks                           = {}   ".format(N_BLOCKS))
         Info( "   Number of points per block                 = {}   ".format(N_PER_BLOCK ))
+        Info( "   Relative increase with zero-padding        = {}   ".format(N_FFT)) 
         Info( "   Min delta t                                = {} s ".format(min(dts)))
         Info( "   Max delta t                                = {} s ".format(max(dts)))
         Info( "   Avg delta t                                = {} s ".format(dt))
         Info( "   Sampling frequency                         = {} Hz".format(fs))
         Info( "   Nyquist frequency                          = {} Hz".format(fs/2.0))
         Info( "   Frequency resolution                       = {} Hz".format(fs/N_PER_BLOCK )) 
+        Info( "   Frequency resolution with zero-padding     = {} Hz".format(fs/(N_FFT*N_PER_BLOCK) )) 
         Info( "   Applied windowing function                 = {}   ".format(WINDOW)) 
-        Info( "   Relative increase with zero-padding        = {}   ".format(N_FFT)) 
         Info( "   Input method                               = {}   ".format(DATA_INPUT_METHOD)) 
         Info( "   Results directory                          = {}   ".format(resultsDirectory))
+        Info( "   Bin width for exporting the largest modes  = {}   ".format(bin_width))
         Info( "   Number of processes                        = {}   ".format(nprocs))
         Info( "   Lower relative confidence bound ({}%)      = {}   ".format(int(100*confidence),lb))
         Info( "   Upper relative confidence bound ({}%)      = {}   ".format(int(100*confidence),ub))
@@ -487,6 +500,7 @@ def main():
         resultsDirectory = None
         dt = None
         WINDOW = None
+        bin_width = None
 
 
     resultsDirectory = comm.bcast(resultsDirectory,root = 0)
@@ -502,7 +516,7 @@ def main():
     N_FFT  = comm.bcast(N_FFT , root=0)
     N_BLOCKS = comm.bcast(N_BLOCKS, root=0)
     WINDOW = comm.bcast(WINDOW, root=0)
-
+    bin_width = comm.bcast(bin_width,root = 0)
     
 
     dt = comm.bcast(dt,root = 0)
@@ -544,6 +558,7 @@ def main():
     Q -= Q.mean(axis=1,keepdims = True)
 
     mm,nn = Q.shape
+
     Plocal = np.sum(Q*Q,axis = 1)/nn # On average, what power do all the signals have, per procerror
 
     Qmean = np.array( comm.gather(Qmean,root = 0),dtype = object)
@@ -598,10 +613,24 @@ def main():
 
     Qhat = Qhat_r + 1j*Qhat_i
 
+    Plocal = 0.5*np.sum(np.abs(Qhat)**2)/(N_BLOCKS*N_FFT)
+
+    Ptotal = np.array(comm.gather(Plocal,root = 0),dtype = object)
+
+    if rank ==0: 
+        Ptotal_VolumeAveraged = np.sum(Ptotal)/mm
+    else:
+        Ptotal_VolumeAveraged = None
+
+    Ptotal_VolumeAveraged = comm.bcast(Ptotal_VolumeAveraged , root=0)  
+
+    Info(f"Total power, volume averaged, via Qhat = {Ptotal_VolumeAveraged}")
+
     del Qhat_r,Qhat_i
 
     m,n,k = Qhat.shape
-    
+
+
     # ***********************************************************************************************
     #
     #     Compute SPOD modes, then eigenvalues, and then, save largest ones
@@ -615,6 +644,7 @@ def main():
     PHI = []
     EigenValuesPerProc = []
     CoeffsPerProc = []
+    FirstModeEigenValuesPerProc = []
 
     Info("Done. Calculating SPOD modes")
     for j in range(0,len(freqs_perProc)): # Loop around all frequencies, whose modes are calculated on this processor
@@ -653,12 +683,46 @@ def main():
 
         CoeffsPerProc.append(coeffs)
 
+        FirstModeEigenValuesPerProc.append(eigvals[0])
+
+
     PHI = np.stack(PHI,axis = 2)
     EigenValuesPerProc = np.vstack(EigenValuesPerProc)
-
     CoeffsPerProc = np.stack(CoeffsPerProc,axis = 2)
+    FirstModeEigenValuesPerProc = np.array(FirstModeEigenValuesPerProc)
 
-    Info(f"Finding and saving SPOD modes with {maxModes} largest eigenvalues")
+    
+
+    comm.barrier()
+    Info(f"Done. Calculating spectrum bins, with bin size of approx {bin_width}")
+
+    num_bins = int(np.ceil((freqs_perProc.max() - freqs_perProc.min()) / bin_width))
+    bin_edges = np.linspace(freqs_perProc.min(), freqs_perProc.max(), num_bins + 1)
+    bin_indices = np.digitize(freqs_perProc, bin_edges)
+
+    max_eig_per_bin = np.zeros(num_bins)
+    max_eig_indices = np.zeros(num_bins,dtype = int)
+
+    for i in range(1, num_bins):
+        bin_mask = (bin_indices == i)
+        if np.any(bin_mask):
+            max_index = np.argmax(FirstModeEigenValuesPerProc[bin_mask])
+            max_eig_indices[i] = np.where(bin_mask)[0][max_index]
+
+
+    Info("Saving modes from the binned spectrum...")
+    for max_eig_index in tqdm(max_eig_indices):
+        f = freqs_perProc[max_eig_index]
+        U = PHI[:,:,max_eig_index]
+        m1,n1 = U.shape
+        U = U.reshape(m1,n1)
+        #print(f"Processor {rank}: Saving mode with the spape {m1,n1} on frequency {f}")
+        np.save(os.path.join(resultsDirectory,"Mode_f_{}".format(f)),U)
+
+    comm.barrier()
+    Info("Done")
+
+    #Info(f"Finding and saving SPOD modes with {maxModes} largest eigenvalues")
     EigenValues = comm.gather(EigenValuesPerProc,root = 0) # Gather all eigenvalues to root
 
     Coeffs = comm.gather(CoeffsPerProc,root = 0) # Gather all coeffs to root
@@ -688,21 +752,23 @@ def main():
         Info("Saving all frequencies...")
         np.save(os.path.join(resultsDirectory,"Frequencies"),freqs)
 
-        sorted_ind = np.argsort(np.sum(EigenValues,axis = 1))[::-1]
+        #sorted_ind = np.argsort(np.sum(EigenValues,axis = 1))[::-1]
 
-        sorted_ind = sorted_ind[0:maxModes] # Only first maxModes modes will be written
+        #sorted_ind = sorted_ind[0:maxModes] # Only first maxModes modes will be written
 
-        freqs_to_write = freqs[sorted_ind]
+        #freqs_to_write = freqs[sorted_ind]
     else:
         EigenValues = None 
         sorted_ind = None 
-        freqs_to_write = None
+        #freqs_to_write = None
 
-    EigenValues = comm.bcast(EigenValues,root = 0)
-    sorted_ind = comm.bcast(sorted_ind,root = 0)
-    freqs_to_write = comm.bcast(freqs_to_write,root = 0)
+    #EigenValues = comm.bcast(EigenValues,root = 0)
+    #sorted_ind = comm.bcast(sorted_ind,root = 0)
+    #freqs_to_write = comm.bcast(freqs_to_write,root = 0)
 
 
+
+    '''
     for ind,f in enumerate(freqs_to_write):
         if f in freqs_perProc:
             j = np.where(freqs_perProc==f)[0]
@@ -711,7 +777,7 @@ def main():
             U = U.reshape(m1,n1)
             print(f"Processor {rank}: Saving mode {ind} on frequency {f}")
             np.save(os.path.join(resultsDirectory,"Mode_{}_f_{}".format(ind,f)),U)
-
+    '''
 
     # ***********************************************************************************************
     #
