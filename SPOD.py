@@ -822,6 +822,8 @@ def main():
         Qm = Q[i]
         Q[i] = np.stack([Qm[:,i*N_PER_BLOCK //2: (i+2)*N_PER_BLOCK //2] for i in range(nBlocks)],axis = 2)
 
+
+
     # Check if the measurements can be concatenated
     terminateSPOD = False
     try:
@@ -834,6 +836,7 @@ def main():
         comm.Abort()
     del Qm
 
+    #print(f"On processor {rank},shape of Q = {Q.shape}")
     chunkSizes = comm.gather(sys.getsizeof(Q),root=0)
     comm.barrier()
     if rank ==0 : 
@@ -859,19 +862,23 @@ def main():
 
     m1,n1 = Qmean.shape
     Q = Q - Qmean.reshape(m1,n1,1)
-
+    #print(f"On processor {rank},shape of Qmean = {Qmean.shape}")
     # Local kinetic energy in time :
     # ---------------------------------
     Klocal = Qvar #np.sum(Q*Q, axis = (0,2)).reshape((-1,1))
     #print(f"On processor {rank}, Klocal.shape = {Klocal.shape}")
     Ktotal = np.array(comm.gather(Klocal,root = 0),dtype = object)
-    
+
     # Average power:
     # ---------------------------------
 
-    Plocal = Qvar #np.sum(Q*Q,axis = (1,2))/(N_PER_BLOCK*nBlocks*nMeasurements)
+    Plocal = Qvar                      
+
     Ptotal = np.array(comm.gather(Plocal,root = 0),dtype = object)
 
+    Qmean = np.array(comm.gather(Qmean,root = 0),dtype = object)
+
+    Qvar = np.array(comm.gather(Qvar,root = 0),dtype = object)    
     if rank == 0:
 
         # Local kinetic energy in time:
