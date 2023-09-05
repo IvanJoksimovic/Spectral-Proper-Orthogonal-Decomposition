@@ -51,6 +51,8 @@ global N_PER_BLOCK
 
 maxModes = 60
 
+global logFile
+
 
 
 
@@ -263,6 +265,21 @@ class DATA_INPUT_FUNCTIONS:
         else:
             return data[indXYZ,0:3]
 
+    def readVector_DrivAer_FrontLeft_Tyre_FullDomain(path,returnOnlyCoordinates = False):
+        data = np.genfromtxt(path,delimiter=None,skip_header=2)
+        x = data[:,0]
+        y = data[:,1]
+        z = data[:,2]
+
+        indXYZ = np.where( (x<2) & (x>-0.5) & (y<-0) & (y>-1.5) & (z<0.45) )
+        #indXYZ1 = np.where( (x-0.012033614)**2 + (z+0.002480046)**2   > 0.270966386**2 )   
+        #indXYZ = np.intersect1d(indXYZ,indXYZ1)
+
+        if not returnOnlyCoordinates:
+            data = data[indXYZ,3:6]
+            return data.flatten('F')
+        else:
+            return data[indXYZ,0:3]
     def readVectorMagnitude_DrivAer_FrontLeft_Tyre(path,returnOnlyCoordinates = False):
         data = np.genfromtxt(path,delimiter=None,skip_header=2)
         x = data[:,0]
@@ -299,8 +316,23 @@ class DATA_INPUT_FUNCTIONS:
         else:
             return data[indXYZ,0:3]
 
+    def readVector_DrivAer_xPlane(path,returnOnlyCoordinates = False):
+        data = np.genfromtxt(path,delimiter=None,skip_header=2)
+        x = data[:,0]
+        y = data[:,1]
+        z = data[:,2]
 
-                
+        indXYZ = np.where((y > -1.2) & (y <1.2) & (z<1.0))
+  
+
+        if not returnOnlyCoordinates:
+            data = data[indXYZ,3:6]
+            return data.flatten('F')
+        else:
+            return data[indXYZ,0:3]
+
+
+
 def dataInput(path):
     return getattr(DATA_INPUT_FUNCTIONS, DATA_INPUT_METHOD)(path)
 
@@ -535,7 +567,10 @@ def evaluateSourceData():
 
             time_directories = list_numeric_directories(directory)
 
-            timeFilesUnsorted =  set([t for t in time_directories if (float(t) >= tStart and float(t) <= tEnd)])
+            timeFilesUnsorted =  set([t for t in time_directories if (float(t) >= 3.097263122397397) ])
+
+            #timeFilesUnsorted =  set([t for t in time_directories])
+        
         
             timeFilesStr = sorted(timeFilesUnsorted, key=lambda x: float(x))
             
@@ -727,7 +762,11 @@ def main():
     #**********************************************************************************
 
     Q = []
+    Qmean = []
+    Qvar = []
+
     for measurement in range(0,nMeasurements):
+
         local_files = split_file_list[measurement][rank]
         #print(f"On processor {rank}, for measurement {measurement}, number of local files is {len(local_files)}")
 
@@ -751,18 +790,44 @@ def main():
 
         Qm = distribute2DColumnChunksToRowChunks(Qm)
 
-        Qm = np.stack([Qm[:,i*N_PER_BLOCK //2: (i+2)*N_PER_BLOCK //2] for i in range(nBlocks)],axis = 2)
+        Qmm = Qm.mean(axis=1).reshape((-1,1))
+
+        #Qm = np.stack([Qm[:,i*N_PER_BLOCK //2: (i+2)*N_PER_BLOCK //2] for i in range(nBlocks)],axis = 2)
 
         Q.append(Qm)
 
-        #Info(f"For measurement {measurement}, Qm.shape = {Qm.shape}")
+    Info("Calculating mean and variance")
+
+    m,n = Q[0].shape
+    Qmean = np.zeros((m,1))
+    Qvar = np.zeros((m,1))
+
+    if rank == 0:
+        Range = tqdm(range(0,m))
+    else:
+        Range = range(0,m)
+
+    for i in Range:
+        values_at_point_m = np.concatenate([list(q[i,:]) for q in Q])
+        Qmean[i] = np.mean(values_at_point_m)
+        Qvar[i] = np.var(values_at_point_m)        
+        #if rank == 0: print(f"shape of values_at_point_m = {values_at_point_m.shape}")
+
+    Info("Done. Re-chunking the data matrix")
+    if rank == 0:
+        Range = tqdm(range(0,len(Q)))
+    else:
+        Range = range(0,len(Q))
+    for i in Range:
+        Qm = Q[i]
+        Q[i] = np.stack([Qm[:,i*N_PER_BLOCK //2: (i+2)*N_PER_BLOCK //2] for i in range(nBlocks)],axis = 2)
 
     # Check if the measurements can be concatenated
     terminateSPOD = False
     try:
         Q = np.concatenate(Q,-1)
     except:
-        print(f"On procesor {rank}, unable to concatenate chunks, sizes are {[q.shape for f in Q]}")
+        print(f"On procesor {rank}, unable to concatenate chunks, sizes are {[q.shape for q in Q]}")
         terminateSPOD = True
     if terminateSPOD:
         comm.barrier()
@@ -789,34 +854,27 @@ def main():
 
     # Statistics:
     # ---------------------------------
-    Qmean = Q.mean(axis=(1,2)).reshape((-1,1))
-    Qvar = Q.var(axis=(1,2)).reshape((-1,1))
-    Q -= Q.mean(axis=(1,2),keepdims = True)
+   
+    #Q -= Qmean #.mean(axis=(1,2),keepdims = True)
 
-    Qmean = np.array( comm.gather(Qmean,root = 0),dtype = object)
-    Qvar = np.array( comm.gather(Qvar,root = 0),dtype = object )
+    m1,n1 = Qmean.shape
+    Q = Q - Qmean.reshape(m1,n1,1)
 
     # Local kinetic energy in time :
     # ---------------------------------
-    Klocal = np.sum(Q*Q, axis = (0,2)).reshape((-1,1))
-    print(f"On processor {rank}, Klocal.shape = {Klocal.shape}")
+    Klocal = Qvar #np.sum(Q*Q, axis = (0,2)).reshape((-1,1))
+    #print(f"On processor {rank}, Klocal.shape = {Klocal.shape}")
     Ktotal = np.array(comm.gather(Klocal,root = 0),dtype = object)
     
     # Average power:
     # ---------------------------------
 
-    Plocal = np.sum(Q*Q,axis = (1,2))/(N_PER_BLOCK*nBlocks*nMeasurements)
+    Plocal = Qvar #np.sum(Q*Q,axis = (1,2))/(N_PER_BLOCK*nBlocks*nMeasurements)
     Ptotal = np.array(comm.gather(Plocal,root = 0),dtype = object)
 
     if rank == 0:
 
         # Local kinetic energy in time:
-
-        Ktotal = np.sum(np.concatenate(Ktotal,axis = 1),axis = 1).reshape((-1,1))
-        time_Ktotal = np.linspace(0,len(Ktotal)*dt,len(Ktotal)).reshape((-1,1))
-
-        TotalKineticEnergyEvolution = np.concatenate([time_Ktotal,Ktotal],axis = 1)
-
 
         Ptotal  = np.concatenate(Ptotal )
         mm = len(Ptotal)
@@ -825,8 +883,7 @@ def main():
 
         Info(f"Total power                  = {Ptotal}")
         Info(f"Total power, volume averaged = {Ptotal_VolumeAveraged}")
-
-        
+    
         Qmean = np.concatenate(Qmean).reshape((-1,1))
         Qvar = np.concatenate(Qvar).reshape((-1,1))
 
@@ -843,10 +900,6 @@ def main():
         
         Info("Done. Saving Variance...")
         np.save(os.path.join(resultsDirectory,"VarianceField"),Qvar)
-
-        Info("Done. Saving evolution of total kinetic energy...")
-        np.save(os.path.join(resultsDirectory,"time_vs_totalKineticEnergy"),TotalKineticEnergyEvolution)        
-
 
     #**********************************************************************************
     #**********************************************************************************
