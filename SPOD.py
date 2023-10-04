@@ -567,7 +567,7 @@ def evaluateSourceData():
 
             time_directories = list_numeric_directories(directory)
 
-            timeFilesUnsorted =  set([t for t in time_directories if (float(t) >= 3.097263122397397) ])
+            timeFilesUnsorted =  set([t for t in time_directories ])
 
             #timeFilesUnsorted =  set([t for t in time_directories])
         
