@@ -12,8 +12,8 @@ from scipy.fft import rfft,rfftfreq,fft,fftfreq
 from scipy.linalg import svd,eig
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-
-
+import pyvista as pv
+from scipy.interpolate import griddata
 
 global nprocs
 global comm
@@ -207,22 +207,366 @@ def gather2DDataToRoot(Qhati):
 
 def Info(string):
 
-    #global rank 
+
+    global rank 
+    global logFile
 
     if rank ==0:
 
         print(string)
-        #f = open(logFile,'a')
-        #f.write(string)
-        #f.write('\n')
-        #f.close()
+        f = open(logFile,'a')
+        f.write(string)
+        f.write('\n')
+        f.close()
 
 
 
 class DATA_INPUT_FUNCTIONS:
 
+    def readVelocityFieldFrom_zPlaneVTP_frontLeftTyre(path,returnOnlyCoordinates = False):
+
+        xMin =  0.0781
+        xMax =  0.4798
+        yMin = -1.2787
+        yMax = -0.8571
+
+        xp = np.linspace(xMin,xMax,121) # About 3mm resolution
+        yp = np.linspace(yMin,yMax,127) # Abbout 3mm resolution
+
+        X_grid,Y_grid = np.meshgrid(xp,yp)
+
+        #print(f"Importing mesh from file {path}")
+        mesh = pv.read(path,progress_bar=False)
+
+        #print(f"Extracting coordinates ")
+        coordinates  = mesh.cell_centers().points
+        X,Y,Z = coordinates[:,0],coordinates[:,1],coordinates[:,2]
+
+        if returnOnlyCoordinates:
+            X = X_grid.flatten()
+            Y = Y_grid.flatten()
+            Z = np.mean(Z)*np.ones_like(X)
+            return np.column_stack((X,Y,Z))
+        else:
+
+            #print(f"Extracting pressure force")  
+
+            U = mesh.get_array('U')
+
+            ind = np.where((X > xMin) & (X< xMax) & (Y>yMin) & (Y < yMax))
+            X = X[ind]
+            Y = Y[ind]
+            Z = Z[ind]
+            Ux = U[ind][:,0]
+            Uy = U[ind][:,1]
+            Uz = U[ind][:,2]
+
+            Ux_grid = griddata((X,Y),Ux,(X_grid,Y_grid),method = 'linear',fill_value = 0).flatten()
+            Uy_grid = griddata((X,Y),Uy,(X_grid,Y_grid),method = 'linear',fill_value = 0).flatten()
+            Uz_grid = griddata((X,Y),Uz,(X_grid,Y_grid),method = 'linear',fill_value = 0).flatten()
+
+            U = np.hstack((Ux_grid,Uy_grid,Uz_grid))
+
+            return U
+
+    def readVelocityFieldMagnitudeFrom_zPlaneVTP_frontLeftTyre(path,returnOnlyCoordinates = False):
+
+        xMin =  0.0781
+        xMax =  0.4798
+        yMin = -1.2787
+        yMax = -0.8571
+
+        xp = np.linspace(xMin,xMax,121) # About 3mm resolution
+        yp = np.linspace(yMin,yMax,127) # Abbout 3mm resolution
+
+        X_grid,Y_grid = np.meshgrid(xp,yp)
+
+        #print(f"Importing mesh from file {path}")
+        mesh = pv.read(path,progress_bar=False)
+
+        #print(f"Extracting coordinates ")
+        coordinates  = mesh.cell_centers().points
+        X,Y,Z = coordinates[:,0],coordinates[:,1],coordinates[:,2]
+
+        if returnOnlyCoordinates:
+            X = X_grid.flatten()
+            Y = Y_grid.flatten()
+            Z = np.mean(Z)*np.ones_like(X)
+            return np.column_stack((X,Y,Z))
+        else:
+
+            #print(f"Extracting pressure force")  
+
+            U = mesh.get_array('U')
+
+            ind = np.where((X > xMin) & (X< xMax) & (Y>yMin) & (Y < yMax))
+         
+            
+
+            X = X[ind]
+            Y = Y[ind]
+            Z = Z[ind]
+            Ux = U[ind][:,0]
+            Uy = U[ind][:,1]
+            Uz = U[ind][:,2]
+            U = np.sqrt(Ux**2 + Uy**2 + Uz**2)
+            ind0 = np.where((X<0.0758) & (Y > -0.923))
+            U[ind0] = 0.0
+        
+
+            U_grid = griddata((X,Y),U,(X_grid,Y_grid),method = 'linear',fill_value = 0).flatten()
+
+
+            #U = np.hstack((Ux_grid,Uy_grid,Uz_grid))
+
+
+            return U_grid
+
+    def readVelocityFieldMagnitudeFrom_PointCloud_z35mm_frontLeftTyre(path,returnOnlyCoordinates = False):
+
+        xMin =  0.0781
+        xMax =  0.4798
+        yMin = -1.2787
+        yMax = -0.8571
+
+        xp = np.linspace(xMin,xMax,121) # About 3mm resolution
+        yp = np.linspace(yMin,yMax,127) # Abbout 3mm resolution
+
+        X_grid,Y_grid = np.meshgrid(xp,yp)
+
+        data = np.genfromtxt(path,delimiter=None,skip_header=0)
+        #Info(f"data.shape = {data.shape}")
+        #comm.barrier()
+        #comm.Abort()
+        X,Y,Z = data[:,0],data[:,1],data[:,2]
+
+        ind = np.where(np.abs(Z - 35.2e-3)<1e-3)
+
+    
+
+        X = X[ind]
+        Y = Y[ind]
+        Z = Z[ind]
+
+        if returnOnlyCoordinates:
+            X = X_grid.flatten()
+            Y = Y_grid.flatten()
+            Z = np.mean(Z)*np.ones_like(X)
+            return np.column_stack((X,Y,Z))
+        else:
+            Ux = data[:,4]
+            Uy = data[:,5]
+            Uz = data[:,6]
+            U = np.sqrt(Ux**2 + Uy**2 + Uz**2)
+            U = U[ind]
+            ind0 = np.where((X<0.0758) & (Y > -0.923))  
+            U[ind0] = 0.0
+        
+        
+            U_grid = griddata((X,Y),U,(X_grid,Y_grid),method = 'linear',fill_value = 0).flatten()
+            ind = np.where(np.isnan(U_grid))
+            U_grid[ind] =0.0
+            '''
+            if( any(np.isnan(x) for x in U_grid.flatten())):
+                print(f"U contains nan, path = {path}!!!")
+                print(f"Numver of nans is {sum(np.isnan(x) for x in U.flatten())}")
+
+                if rank ==0:
+                    plt.contourf(X_grid,Y_grid,U_grid,cmap = 'jet')
+                    plt.show()
+                    comm.Abort()
+            '''            
+            return U_grid.flatten()
+
+
+
+    def readVelocityFieldMagnitudeFrom_PowerFlow_frontLeftTyre(path,returnOnlyCoordinates = False):
+
+        xMin =  0.0781
+        xMax =  0.4798
+        yMin = -1.2787
+        yMax = -0.8571
+
+        xp = np.linspace(xMin,xMax,121) # About 3mm resolution
+        yp = np.linspace(yMin,yMax,127) # Abbout 3mm resolution
+
+        X_grid,Y_grid = np.meshgrid(xp,yp)
+
+        data = np.genfromtxt(path,delimiter=',',skip_header=1)
+
+        X,Y,Z = data[:,-3],data[:,-2],data[:,-1]
+
+        if returnOnlyCoordinates:
+            X = X_grid.flatten()
+            Y = Y_grid.flatten()
+            Z = np.mean(Z)*np.ones_like(X)
+            return np.column_stack((X,Y,Z))
+        else:
+            U = data[:,0]
+            ind0 = np.where((X<0.2673) & (Y > -0.923))  
+            U[ind0] = 0.0
+            U_grid = griddata((X,Y),U,(X_grid,Y_grid),method = 'linear',fill_value = 0).flatten()
+            ind = np.where(np.isnan(U_grid))
+            U_grid[ind] =0.0
+            '''
+            if( any(np.isnan(x) for x in U_grid.flatten())):
+                print(f"U contains nan, path = {path}!!!")
+                print(f"Numver of nans is {sum(np.isnan(x) for x in U.flatten())}")
+
+                if rank ==0:
+                    plt.contourf(X_grid,Y_grid,U_grid,cmap = 'jet')
+                    plt.show()
+                    comm.Abort()
+            '''            
+            return U_grid.flatten()
+
+    def readVelocityFieldMagnitudeFrom_STAR_frontLeftTyre(path,returnOnlyCoordinates = False):
+
+        xMin =  0.0781
+        xMax =  0.4798
+        yMin = -1.2787
+        yMax = -0.8571
+
+        xp = np.linspace(xMin,xMax,121) # About 3mm resolution
+        yp = np.linspace(yMin,yMax,127) # Abbout 3mm resolution
+
+        X_grid,Y_grid = np.meshgrid(xp,yp)
+
+        data = np.genfromtxt(path,delimiter=',',skip_header=1)
+
+        X,Y,Z = data[:,-3],data[:,-2],data[:,-1]
+
+        U = data[:,0]
+
+        ind = np.where((X>=xMin) & (X <= xMax) & (Y >=yMin) & (Y <= yMax))
+
+        X,Y,Z,U = X[ind],Y[ind],Z[ind],U[ind]
+
+        if returnOnlyCoordinates:
+            #X = X_grid.flatten()
+            #Y = Y_grid.flatten()
+            #Z = np.mean(Z)*np.ones_like(X)
+            return np.column_stack((X,Y,Z))
+        else:
+            #U = data[:,0]
+            #ind0 = np.where((X<0.2673) & (Y > -0.923))  
+            #U[ind0] = 0.0
+            #U_grid = griddata((X,Y),U,(X_grid,Y_grid),method = 'linear',fill_value = 0).flatten()
+            #ind = np.where(np.isnan(U_grid))
+            #U_grid[ind] =0.0
+            '''
+            if( any(np.isnan(x) for x in U_grid.flatten())):
+                print(f"U contains nan, path = {path}!!!")
+                print(f"Numver of nans is {sum(np.isnan(x) for x in U.flatten())}")
+
+                if rank ==0:
+                    plt.contourf(X_grid,Y_grid,U_grid,cmap = 'jet')
+                    plt.show()
+                    comm.Abort()
+            '''            
+            return U.flatten()
+
+    def readVelocityFieldMagnitudeFrom_PointCloud_z35mm_frontLeftTyre(path,returnOnlyCoordinates = False):
+
+        xMin =  0.0781
+        xMax =  0.4798
+        yMin = -1.2787
+        yMax = -0.8571
+
+        xp = np.linspace(xMin,xMax,121) # About 3mm resolution
+        yp = np.linspace(yMin,yMax,127) # Abbout 3mm resolution
+
+        X_grid,Y_grid = np.meshgrid(xp,yp)
+
+        data = np.genfromtxt(path,delimiter=None,skip_header=0)
+        #Info(f"data.shape = {data.shape}")
+        #comm.barrier()
+        #comm.Abort()
+        X,Y,Z = data[:,0],data[:,1],data[:,2]
+
+        ind = np.where(np.abs(Z - 35.2e-3)<1e-3)
+
+    
+
+        X = X[ind]
+        Y = Y[ind]
+        Z = Z[ind]
+
+        if returnOnlyCoordinates:
+            X = X_grid.flatten()
+            Y = Y_grid.flatten()
+            Z = np.mean(Z)*np.ones_like(X)
+            return np.column_stack((X,Y,Z))
+        else:
+            Ux = data[:,4]
+            Uy = data[:,5]
+            Uz = data[:,6]
+            U = np.sqrt(Ux**2 + Uy**2 + Uz**2)
+            U = U[ind]
+            ind0 = np.where((X<0.0758) & (Y > -0.923))  
+            U[ind0] = 0.0
+        
+        
+            U_grid = griddata((X,Y),U,(X_grid,Y_grid),method = 'linear',fill_value = 0).flatten()
+            ind = np.where(np.isnan(U_grid))
+            U_grid[ind] =0.0
+            '''
+            if( any(np.isnan(x) for x in U_grid.flatten())):
+                print(f"U contains nan, path = {path}!!!")
+                print(f"Numver of nans is {sum(np.isnan(x) for x in U.flatten())}")
+
+                if rank ==0:
+                    plt.contourf(X_grid,Y_grid,U_grid,cmap = 'jet')
+                    plt.show()
+                    comm.Abort()
+            '''            
+            return U_grid.flatten()
+
+    def readCloudVelocityVector(path,returnOnlyCoordinates = False):
+        data = np.genfromtxt(path,delimiter=None,skip_header=0)
+        #print(path)
+        if not returnOnlyCoordinates:
+            data = data[:,4:7]
+            return data.flatten('F')
+        else:
+            return data[:,0:3]
+
+    def readCloudVelocityMagnitude(path,returnOnlyCoordinates = False):
+        data = np.genfromtxt(path,delimiter=None,skip_header=0)
+        #print(path)
+        if not returnOnlyCoordinates:
+            U = data[:,4:7]
+            Ux = U[:,0]
+            Uy = U[:,1]
+            Uz = U[:,2]
+            U = np.sqrt(Ux**2 + Uy**2 + Uz**2)
+            return U.flatten()
+        else:
+            return data[:,0:3]
+
+    def readCloudVelocityMagnitude2D(path,returnOnlyCoordinates = False):
+        data = np.genfromtxt(path,delimiter=None,skip_header=0)
+        #print(path)
+        if not returnOnlyCoordinates:
+            U = data[:,4:7]
+            Ux = U[:,0]
+            Uy = U[:,1]
+            #Uz = U[:,2]
+            U = np.sqrt(Ux**2 + Uy**2)
+            return U.flatten()
+        else:
+            return data[:,0:3]
+
     def readScalar(path,returnOnlyCoordinates = False):
         data = np.genfromtxt(path,delimiter=None,skip_header=1)
+        #print(path)
+        if not returnOnlyCoordinates:
+            return data[:,-1]
+        else:
+            return data[:,0:3]
+
+    def readScalarFromCSV(path,returnOnlyCoordinates = False):
+        data = np.genfromtxt(path,delimiter=',',skip_header=1)
         #print(path)
         if not returnOnlyCoordinates:
             return data[:,-1]
@@ -420,9 +764,12 @@ def parseInputArguments():
     global dt 
     global fs
 
-    Info("Parsing data ...")
+    global logFile
+
+    
 
     if(rank ==0):
+
         
         # Create input arguments:
         
@@ -439,7 +786,7 @@ def parseInputArguments():
         ap.add_argument("-nfft", "--N_FFT", required=False,help="Multiplicator of the time-dimension for zero-padding")        
         ap.add_argument("-w", "--window", required=False,help="Windowing function, default = Hamming")        
         ap.add_argument("-b", "--binWidth", required=False,help="Width of the bin, in which the modes with maximum eigenvalues will be exported")   
-
+        
         args = vars(ap.parse_args())
         
         # Parse input arguments
@@ -464,6 +811,8 @@ def parseInputArguments():
             os.makedirs(resultsDirectory,exist_ok=True)
 
         logFile = os.path.join(resultsDirectory,'log_SPOD')
+
+        Info("Parsing data ...")
             
                              
         global DATA_INPUT_METHOD 
@@ -564,21 +913,23 @@ def evaluateSourceData():
 
         for directory in sampleDirectories:
 
-
             time_directories = list_numeric_directories(directory)
 
-            timeFilesUnsorted =  set([t for t in time_directories ])
+            timeFilesUnsorted =  set([t for t in time_directories])
 
-            #timeFilesUnsorted =  set([t for t in time_directories])
-        
-        
-            timeFilesStr = sorted(timeFilesUnsorted, key=lambda x: float(x))
-            
-            timeFiles = [float(t) for t in timeFilesStr]
-          
-            if(tEnd > timeFiles[-1]):
-                tEnd =  timeFiles[-1]
-        
+            timeFilesStrAll = sorted(timeFilesUnsorted, key=lambda x: float(x))
+
+            timeFilesStr = []
+            timeFiles = []
+
+            for t in timeFilesStrAll:
+                if (float(t)>=tStart and float(t)<=tEnd):
+                    timeFilesStr.append(t)
+                    timeFiles.append(float(t))
+
+            #if(tEnd > timeFiles[-1]):
+            #    tEnd =  timeFiles[-1]
+
             N_PER_BLOCK = round(math.floor(2*len(timeFiles)/(nBlocks+1)))
             
             N = min(len(timeFiles),round(0.5*N_PER_BLOCK *(nBlocks+1)))
@@ -679,6 +1030,8 @@ def main():
 
     evaluateSourceData() # Then, evaluate source data
 
+    #comm.Abort()
+
     if rank ==0 :
 
         confidence = 0.95
@@ -695,10 +1048,16 @@ def main():
         Info( "   Number of blocks per measurement           = {}   ".format(nBlocks))
         Info( "   Number of points per block                 = {}   ".format(N_PER_BLOCK ))
         Info( "   Relative increase with zero-padding        = {}   ".format(nFFT)) 
-        #Info( "   Min delta t per sample measurement         = {} s ".format(dt_min))
-        #Info( "   Max delta t per sample measurement         = {} s ".format(dt_max))
-        #Info( "   Averaged delta t per sample measurement    = {} s ".format(dt_avg))
-        #Info( "   Sampling frequency per sample measurement  = {} s ".format(fs_avg))
+
+
+        Info( "   Min delta t per sample measurement         = {} s ".format(dt_min))
+        Info( "   Max delta t per sample measurement         = {} s ".format(dt_max))
+        Info( "   Averaged delta t per sample measurement    = {} s ".format(dt_avg))
+        Info( "   Sampling frequency per sample measurement  = {} s ".format(fs_avg))
+
+        Info( "   Start time                                 = {} s ".format( timePaths[0][0].split(os.sep)[-2]  ))
+        Info( "   End time                                   = {} s ".format( timePaths[0][-1].split(os.sep)[-2]  ))
+
         Info( "   Applied   delta t                          = {} s ".format(dt))
         Info( "   Applied sampling frequency                 = {} Hz".format(fs))
         Info( "   Nyquist frequency                          = {} Hz".format(fs/2.0))
@@ -714,8 +1073,8 @@ def main():
   
         Info("------------------------------------------------------------------")
 
-        #answer = input("If satisfied with frequency resolution, continue y/n?  ")
-        answer = "y"    
+        answer = input("If satisfied with frequency resolution, continue y/n?  ")
+        #answer = "y"    
         if( answer not in ["y","Y","yes","Yes","z","Z"]):
             print("OK, exiting calculation")
             comm.Abort()
@@ -790,7 +1149,7 @@ def main():
 
         Qm = distribute2DColumnChunksToRowChunks(Qm)
 
-        Qmm = Qm.mean(axis=1).reshape((-1,1))
+        #Qmm = Qm.mean(axis=1).reshape((-1,1))
 
         #Qm = np.stack([Qm[:,i*N_PER_BLOCK //2: (i+2)*N_PER_BLOCK //2] for i in range(nBlocks)],axis = 2)
 
@@ -853,13 +1212,11 @@ def main():
     #**********************************************************************************
     #**********************************************************************************
 
-    Info(f"Calculating mean,variance and total power...")
+    Info(f"Calculating mean,variance and total power, subtracting mean...")
 
     # Statistics:
     # ---------------------------------
    
-    #Q -= Qmean #.mean(axis=(1,2),keepdims = True)
-
     m1,n1 = Qmean.shape
     Q = Q - Qmean.reshape(m1,n1,1)
     #print(f"On processor {rank},shape of Qmean = {Qmean.shape}")
@@ -888,15 +1245,13 @@ def main():
         Ptotal= np.sum(Ptotal)
         Ptotal_VolumeAveraged = Ptotal/mm
 
-        Info(f"Total power                  = {Ptotal}")
-        Info(f"Total power, volume averaged = {Ptotal_VolumeAveraged}")
+        Info(f"Total power                  = {0.5*Ptotal}")
+        Info(f"Total power, volume averaged = {0.5*Ptotal_VolumeAveraged}")
     
         Qmean = np.concatenate(Qmean).reshape((-1,1))
         Qvar = np.concatenate(Qvar).reshape((-1,1))
 
         mm,nn = Qmean.shape
-
-        #print(f"Qmean.shape = {Qmean.shape}")
 
         Info("Done. Saving coordinates...")
         XYZ = getattr(DATA_INPUT_FUNCTIONS,DATA_INPUT_METHOD)(local_files[0],returnOnlyCoordinates = True)
@@ -959,31 +1314,42 @@ def main():
         QQ = Qhat[:,j,:]
 
         mm,kk = QQ.shape
-        # First way, using svd decopmosition
 
+        # First way, using svd decopmosition
+    
         Phi, Sig,Vh = svd(Qhat[:,j,:], full_matrices=False) 
 
-        eigvals = (Sig**2)
+        eigvals = Sig*np.conj(Sig) #(Sig**2)
 
         Sig = np.matrix(np.diag(Sig))
 
         coeffs = np.array(np.dot(Sig,Vh)) # Coefficients to multiply modes
-        ''' 
+     
         # Second way, using method of snapshots
-        C = np.dot(np.conjugate(QQ).T,QQ)
+        '''
+        Ch = np.dot(np.conjugate(QQ).T,QQ)
 
-        eigvals, Psi = eig(C)
+        eigvals, Psi = eig(Ch)
 
         ind = np.argsort(np.abs(eigvals))[::-1]
 
         eigvals = eigvals[ind]
+
         Psi = Psi[:,ind]
 
-        Phi = np.dot(QQ,Psi)
+        print(f"eigvals = {eigvals}")
 
-        coeffs = np.dot(np.conjugate(Phi).T,QQ)
+        #comm.Abort()
+
+        #np.array(eigvals)**(-1)
+
+        Phi = np.dot(QQ,np.dot(Psi, ))
+
+        #Phi = np.dot(QQ,Psi)
+
+        coeffs = Psi #np.dot(np.conjugate(Phi).T,QQ)/(mm*kk)
         '''
-
+        # Append and continue
         
         PHI.append(Phi)
 
