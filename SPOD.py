@@ -1066,7 +1066,7 @@ def main():
         Info( "   Applied windowing function                 = {}   ".format(windowingFunction)) 
         Info( "   Input method                               = {}   ".format(DATA_INPUT_METHOD)) 
         Info( "   Results directory                          = {}   ".format(resultsDirectory))
-        Info( "   Bin width for exporting the largest modes  = {}   ".format(binWidth))
+        Info( "   Bin width for exporting the largest modes  = {} Hz".format(binWidth))
         Info( "   Number of processes                        = {}   ".format(nprocs))
         Info( "   Lower relative confidence bound ({}%)      = {}   ".format(int(100*confidence),lb))
         Info( "   Upper relative confidence bound ({}%)      = {}   ".format(int(100*confidence),ub))
@@ -1365,24 +1365,30 @@ def main():
     CoeffsPerProc = np.stack(CoeffsPerProc,axis = 2)
     FirstModeEigenValuesPerProc = np.array(FirstModeEigenValuesPerProc)
 
-    
-
     comm.barrier()
     Info(f"Done. Calculating spectrum bins, with bin size of approx {binWidth}")
 
     num_bins = int(np.ceil((freqs_perProc.max() - freqs_perProc.min()) / binWidth))
     bin_edges = np.linspace(freqs_perProc.min(), freqs_perProc.max(), num_bins + 1)
-    bin_indices = np.digitize(freqs_perProc, bin_edges)
+    #bin_indices = np.digitize(freqs_perProc, bin_edges)
+    bin_indices = np.zeros_like(freqs_perProc,dtype = int)
+
+    # Populate bin indices
+    for i in range(len(bin_edges)-1):
+        bin_lower = bin_edges[i]
+        bin_upper = bin_edges[i+1]
+        bin_indices[np.where((freqs_perProc >=bin_lower) & (freqs_perProc < bin_upper))] = i
+       
 
     max_eig_per_bin = np.zeros(num_bins)
     max_eig_indices = np.zeros(num_bins,dtype = int)
 
-    for i in range(1, num_bins):
+
+    for i in range(0, num_bins):
         bin_mask = (bin_indices == i)
         if np.any(bin_mask):
             max_index = np.argmax(FirstModeEigenValuesPerProc[bin_mask])
             max_eig_indices[i] = np.where(bin_mask)[0][max_index]
-
 
     Info("Saving modes from the binned spectrum...")
     for max_eig_index in tqdm(max_eig_indices):
